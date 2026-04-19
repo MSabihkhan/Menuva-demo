@@ -396,11 +396,52 @@ body, html {
 /* ===== PRINT STYLES ===== */
 
 @media print {
-  body {
-    background: white;
+  body { background: white; }
+  #screen-container { box-shadow: none; }
+}
+
+/* ===== PAYMENT / SHEET ANIMATIONS ===== */
+
+@keyframes slideUpSheet {
+  from {
+    transform: translateY(100%) translateZ(0);
   }
-  
-  #screen-container {
-    box-shadow: none;
+  to {
+    transform: translateY(0) translateZ(0);
   }
+}
+
+/* ===== SUCCESS / PAYMENT CONFIRM ===== */
+
+@keyframes successPop {
+  0%   { transform: scale(0.4); opacity: 0; }
+  60%  { transform: scale(1.15); opacity: 1; }
+  80%  { transform: scale(0.92); }
+  100% { transform: scale(1); }
+}
+
+/* ===== SAFE AREA INSETS for iPhone notch / Dynamic Island ===== */
+
+@supports (padding: env(safe-area-inset-bottom)) {
+  .screen {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* ===== HIDE SCROLLBARS (keep functionality) ===== */
+
+::-webkit-scrollbar { display: none; }
+* { scrollbar-width: none; }
+
+/* ===== DARK SCREEN VARIANT ===== */
+
+.screen.dark {
+  background: #0F0E0D;
+}
+
+/* ===== INPUT FOCUS RING ===== */
+input:focus {
+  border-color: var(--accent) !important;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(200, 118, 10, 0.12);
 }

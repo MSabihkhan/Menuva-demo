@@ -40,8 +40,7 @@ export function StatusBar({ dark, hidden }: StatusBarProps) {
   );
 }
 
-export function HomeIndicator({ dark, hidden }: { dark?: boolean; hidden?: boolean }) {
-  if (hidden) return null;
+export function HomeIndicator({ dark }: { dark?: boolean }) {
   return (
     <div style={{
       position: 'absolute', bottom: 0, left: 0, right: 0, height: 34,
@@ -56,23 +55,33 @@ export function HomeIndicator({ dark, hidden }: { dark?: boolean; hidden?: boole
   );
 }
 
+// BackButton — position: absolute so it stays inside the screen container
 export function BackButton({ onClick, dark }: { onClick?: () => void; dark?: boolean }) {
   const color = dark ? '#fff' : 'var(--ink)';
   return (
-    <div 
+    <div
       onClick={onClick}
+      role="button"
+      aria-label="Go back"
       style={{
-        position: 'fixed', top: 12, left: 16, zIndex: 100,
+        position: 'absolute', top: 50, left: 16, zIndex: 50,
         width: 40, height: 40, borderRadius: '50%',
-        background: dark ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.85)',
-        backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+        background: dark ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.88)',
+        backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+        border: dark ? '1px solid rgba(255,255,255,0.2)' : '1px solid rgba(232,230,225,0.7)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         cursor: 'pointer',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+        boxShadow: '0 2px 12px rgba(0,0,0,0.1)',
+        transition: 'transform 0.12s ease',
       }}
+      onMouseDown={e => (e.currentTarget.style.transform = 'scale(0.9)')}
+      onMouseUp={e => (e.currentTarget.style.transform = 'scale(1)')}
+      onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
+      onTouchStart={e => (e.currentTarget.style.transform = 'scale(0.9)')}
+      onTouchEnd={e => (e.currentTarget.style.transform = 'scale(1)')}
     >
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-        <path d="M15 6L9 12l6 6" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+        <path d="M14 5L8 11l6 6" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
       </svg>
     </div>
   );
@@ -94,23 +103,16 @@ export function Chip({ children, active, muted, size = 'md', style = {}, onClick
   if (active) { bg = 'var(--accent)'; color = '#fff'; }
   else if (muted) { bg = 'var(--surface)'; color = 'var(--ink-2)'; border = '1px solid var(--border)'; }
   else { bg = 'var(--accent-surface)'; color = 'var(--accent)'; }
+  const shared: React.CSSProperties = {
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    padding: pad, borderRadius: 100, background: bg, color,
+    fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: fs, lineHeight: 1,
+    border, whiteSpace: 'nowrap',
+  };
   return onClick ? (
-    <button
-      onClick={onClick}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4,
-        padding: pad, borderRadius: 100, background: bg, color,
-        fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: fs, lineHeight: 1,
-        border, whiteSpace: 'nowrap', cursor: 'pointer', ...style
-      }}
-    >{children}</button>
+    <button onClick={onClick} style={{ ...shared, cursor: 'pointer', ...style }}>{children}</button>
   ) : (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 4,
-      padding: pad, borderRadius: 100, background: bg, color,
-      fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: fs, lineHeight: 1,
-      border, whiteSpace: 'nowrap', ...style
-    }}>{children}</span>
+    <span style={{ ...shared, ...style }}>{children}</span>
   );
 }
 
@@ -121,29 +123,25 @@ interface AvatarProps {
 }
 
 export function Avatar({ initials, size = 36, style = {} }: AvatarProps) {
+  const fontSize = size >= 36 ? 14 : size >= 32 ? 12 : 11;
   return (
     <div style={{
       width: size, height: size, borderRadius: '50%',
       background: 'var(--accent-surface)', color: 'var(--accent)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: size === 36 ? 14 : size === 32 ? 12 : 13,
+      fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize,
       letterSpacing: '0.02em', flexShrink: 0,
       border: '2px solid #fff',
       ...style,
-    }}>{initials}</div>
+    }}>{initials.substring(0, 2).toUpperCase()}</div>
   );
 }
 
-interface AvatarStackProps {
-  people: { initials: string }[];
-  size?: number;
-}
-
-export function AvatarStack({ people, size = 36 }: AvatarStackProps) {
+export function AvatarStack({ people, size = 36 }: { people: { initials: string }[]; size?: number }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center' }}>
       {people.map((p, i) => (
-        <div key={i} style={{ marginLeft: i === 0 ? 0 : -12 }}>
+        <div key={i} style={{ marginLeft: i === 0 ? 0 : -(size * 0.33) }}>
           <Avatar initials={p.initials} size={size} />
         </div>
       ))}
@@ -153,7 +151,7 @@ export function AvatarStack({ people, size = 36 }: AvatarStackProps) {
 
 interface ButtonProps {
   children: React.ReactNode;
-  variant?: 'primary' | 'secondary' | 'ghost' | 'dark-primary';
+  variant?: 'primary' | 'secondary' | 'ghost';
   disabled?: boolean;
   style?: React.CSSProperties;
   onClick?: () => void;
@@ -161,47 +159,51 @@ interface ButtonProps {
 }
 
 export function Button({ children, variant = 'primary', disabled, style = {}, onClick, type = 'button' }: ButtonProps) {
-  const base = {
+  const base: React.CSSProperties = {
     height: 52, borderRadius: 100, width: '100%',
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
     fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 15,
-    border: 'none', cursor: 'pointer', padding: '0 24px',
-    letterSpacing: '-0.005em',
+    border: 'none', cursor: disabled ? 'not-allowed' : 'pointer', padding: '0 24px',
+    letterSpacing: '-0.005em', transition: 'transform 0.12s ease, opacity 0.12s ease',
+    opacity: disabled ? 0.55 : 1,
   };
   let variantStyle: React.CSSProperties = {};
   if (variant === 'primary') variantStyle = { background: 'var(--accent)', color: '#fff' };
-  else if (variant === 'secondary') variantStyle = { background: 'transparent', color: 'var(--ink)', border: '1px solid var(--border)' };
+  else if (variant === 'secondary') variantStyle = { background: 'transparent', color: 'var(--ink)', border: '1.5px solid var(--border)' };
   else if (variant === 'ghost') variantStyle = { background: 'transparent', color: 'var(--error)' };
-  else if (variant === 'dark-primary') variantStyle = { background: 'var(--accent)', color: '#fff' };
-  if (disabled) variantStyle.opacity = 0.6;
   return (
-    <button 
+    <button
       type={type}
-      style={{ ...base, ...variantStyle, ...style }} 
+      style={{ ...base, ...variantStyle, ...style }}
       onClick={disabled ? undefined : onClick}
+      onMouseDown={e => { if (!disabled) e.currentTarget.style.transform = 'scale(0.97)'; }}
+      onMouseUp={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+      onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+      onTouchStart={e => { if (!disabled) e.currentTarget.style.transform = 'scale(0.97)'; }}
+      onTouchEnd={e => { e.currentTarget.style.transform = 'scale(1)'; }}
     >
       {children}
     </button>
   );
 }
 
-interface SmallOutlineButtonProps {
-  children: React.ReactNode;
-  style?: React.CSSProperties;
-  onClick?: () => void;
-}
-
-export function SmallOutlineButton({ children, style = {}, onClick }: SmallOutlineButtonProps) {
+export function SmallOutlineButton({ children, style = {}, onClick }: {
+  children: React.ReactNode; style?: React.CSSProperties; onClick?: () => void;
+}) {
   return (
     <button style={{
       height: 32, borderRadius: 100, padding: '0 14px',
       background: 'transparent', border: '1px solid var(--accent)',
       color: 'var(--accent)', fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 13,
       cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
+      transition: 'transform 0.12s ease',
       ...style,
-    }} onClick={onClick}>
-      {children}
-    </button>
+    }}
+    onMouseDown={e => (e.currentTarget.style.transform = 'scale(0.95)')}
+    onMouseUp={e => (e.currentTarget.style.transform = 'scale(1)')}
+    onTouchStart={e => (e.currentTarget.style.transform = 'scale(0.95)')}
+    onTouchEnd={e => (e.currentTarget.style.transform = 'scale(1)')}
+    onClick={onClick}>{children}</button>
   );
 }
 
@@ -213,30 +215,40 @@ interface InputProps {
   value?: string;
   onChange?: (value: string) => void;
   type?: string;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
 }
 
-export function Input({ label, placeholder, caption, error, value = '', onChange, type = 'text' }: InputProps) {
+export function Input({ label, placeholder, caption, error, value = '', onChange, type = 'text', onKeyDown }: InputProps) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {label && <label style={{ fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 13, color: 'var(--ink-2)' }}>{label}</label>}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {label && (
+        <label style={{ fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 13, color: 'var(--ink-2)' }}>
+          {label}
+        </label>
+      )}
       <input
         type={type}
         value={value}
-        onChange={(e) => onChange?.(e.target.value)}
+        onChange={e => onChange?.(e.target.value)}
+        onKeyDown={onKeyDown}
         placeholder={placeholder}
         style={{
           height: 48, borderRadius: 12,
           background: error ? 'var(--error-surface)' : 'var(--surface)',
-          border: `1px solid ${error ? 'var(--error)' : 'var(--border)'}`,
-          padding: '0 16px', display: 'flex', alignItems: 'center',
+          border: `1.5px solid ${error ? 'var(--error)' : 'var(--border)'}`,
+          padding: '0 16px',
           fontFamily: 'var(--font-sans)', fontSize: 15,
-          color: value ? 'var(--ink)' : 'var(--ink-3)',
-          width: '100%',
+          color: 'var(--ink)', width: '100%',
+          transition: 'border-color 0.15s ease',
         }}
       />
       {error ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--error)' }}>
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1 11 10.5H1L6 1Z" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinejoin="round"/><path d="M6 5v2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/><circle cx="6" cy="9" r="0.6" fill="currentColor"/></svg>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M6 1 11 10.5H1L6 1Z" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinejoin="round"/>
+            <path d="M6 5v2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+            <circle cx="6" cy="9" r="0.6" fill="currentColor"/>
+          </svg>
           {error}
         </div>
       ) : caption ? (
@@ -246,24 +258,19 @@ export function Input({ label, placeholder, caption, error, value = '', onChange
   );
 }
 
-interface ToastProps {
-  message: string;
-  success?: boolean;
-  initials?: string;
-  onDismiss?: () => void;
-}
-
-export function Toast({ message, success, initials, onDismiss }: ToastProps) {
+export function Toast({ message, success, initials, onDismiss }: {
+  message: string; success?: boolean; initials?: string; onDismiss?: () => void;
+}) {
   return (
     <div style={{
-      position: 'absolute', top: 52, left: 16, right: 16, zIndex: 10,
       height: 52, borderRadius: 12,
-      background: 'rgba(255,255,255,0.82)',
+      background: 'rgba(255,255,255,0.88)',
       backdropFilter: 'blur(20px) saturate(180%)',
       WebkitBackdropFilter: 'blur(20px) saturate(180%)',
       border: '1px solid rgba(255,255,255,0.5)',
-      boxShadow: '0 4px 24px rgba(0,0,0,0.06)',
+      boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
       display: 'flex', alignItems: 'center', gap: 12, padding: '0 14px',
+      animation: 'toastIn 0.25s ease',
     }}>
       {success ? (
         <div style={{
@@ -271,31 +278,35 @@ export function Toast({ message, success, initials, onDismiss }: ToastProps) {
           background: 'var(--success-surface)', color: 'var(--success)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
         }}>
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.5 5 9l4.5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M2.5 6.5 5 9l4.5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
         </div>
       ) : initials ? (
         <Avatar initials={initials} size={32} style={{ border: 'none' }} />
       ) : null}
       <div style={{ flex: 1, fontFamily: 'var(--font-sans)', fontSize: 14, color: 'var(--ink)', lineHeight: 1.3 }}>{message}</div>
-      {onDismiss && <div style={{ color: 'var(--ink-3)', fontSize: 20, lineHeight: 1, fontWeight: 300, padding: 4, cursor: 'pointer' }} onClick={onDismiss}>×</div>}
+      {onDismiss && (
+        <div style={{ color: 'var(--ink-3)', fontSize: 20, lineHeight: 1, fontWeight: 300, padding: 4, cursor: 'pointer' }} onClick={onDismiss}>×</div>
+      )}
     </div>
   );
 }
 
-export function FoodTile({ emoji, size = 80, radius = 16, bg = 'var(--surface)' }: { emoji: string; size?: number; radius?: number; bg?: string }) {
+export function FoodTile({ emoji, size = 80, radius = 16, bg = 'var(--surface)' }: {
+  emoji: string; size?: number; radius?: number; bg?: string;
+}) {
   return (
     <div style={{
       width: size, height: size, borderRadius: radius, background: bg,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: size * 0.55, flexShrink: 0,
+      fontSize: size * 0.55, flexShrink: 0, userSelect: 'none',
     }}>{emoji}</div>
   );
 }
 
 export function Divider({ style = {} }: { style?: React.CSSProperties }) {
-  return (
-    <div style={{ height: 1, background: 'var(--border)', width: '100%', ...style }}/>
-  );
+  return <div style={{ height: 1, background: 'var(--border)', width: '100%', ...style }}/>;
 }
 
 export function TableChip({ children = 'Table 7' }: { children?: string }) {
@@ -310,7 +321,7 @@ interface ScreenFrameProps {
 
 export function ScreenFrame({ children, dark = false, style = {} }: ScreenFrameProps) {
   return (
-    <div className={`screen ${dark ? 'dark' : ''}`} style={style}>
+    <div className={`screen${dark ? ' dark' : ''}`} style={style}>
       {children}
     </div>
   );

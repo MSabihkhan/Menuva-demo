@@ -1,13 +1,14 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef, memo } from 'react';
-import { CartItem, GroupMember, Toast, MENU_ITEMS, MenuItem } from '@/data/menu';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { CartItem, GroupMember, Toast, MenuItem } from '@/data/menu';
 
-type Screen = 'welcome' | 'menu' | 'detail' | 'viewer3d' | 'order' | 'waiting' | 'payment';
+export type Screen = 'welcome' | 'menu' | 'detail' | 'viewer3d' | 'order' | 'waiting' | 'payment';
 
-// Maximum toasts to prevent memory accumulation
 const MAX_TOASTS = 3;
 const TOAST_DURATION = 3000;
+const TABLE_ID = 'T7';
+const POLL_INTERVAL = 3000;
 
 interface AppState {
   screen: Screen;
@@ -24,12 +25,15 @@ interface AppState {
 }
 
 interface AppContextType extends AppState {
+  sessionId: string;
+  tableId: string;
   setScreen: (s: Screen) => void;
   setUserName: (name: string) => void;
   setHasGroup: (has: boolean) => void;
   selectItem: (item: MenuItem | null) => void;
   addToCart: (item: MenuItem, quantity: number, extras: string[]) => void;
   removeFromCart: (itemId: string) => void;
+  decrementFromCart: (itemId: string) => void;
   getCartTotal: () => number;
   getCartCount: () => number;
   showToast: (message: string, initials?: string, success?: boolean) => void;
@@ -41,49 +45,62 @@ interface AppContextType extends AppState {
   removeItemExtra: (extraId: string) => void;
   setSelectedCategory: (cat: string) => void;
   goBack: () => void;
+  joinTable: (name: string) => Promise<void>;
+  resetOrder: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
 
-// Helper functions for cart calculations (using React.useMemo in components)
-// These are simple pure functions, no need for memoization at this level
+function getOrCreateSessionId(): string {
+  if (typeof window === 'undefined') return 'ssr';
+  try {
+    let id = localStorage.getItem('menuva-session-id');
+    if (!id) {
+      id = `${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 9)}`;
+      localStorage.setItem('menuva-session-id', id);
+    }
+    return id;
+  } catch {
+    return `tmp-${Date.now()}`;
+  }
+}
+
+function loadPersistedState(): { userName: string; currentUserItems: CartItem[] } {
+  if (typeof window === 'undefined') return { userName: '', currentUserItems: [] };
+  try {
+    const raw = localStorage.getItem('menuva-state');
+    if (!raw) return { userName: '', currentUserItems: [] };
+    const parsed = JSON.parse(raw);
+    const currentUser = (parsed.groupMembers || []).find((m: GroupMember) => m.isCurrentUser);
+    return {
+      userName: parsed.userName || '',
+      currentUserItems: currentUser?.items || [],
+    };
+  } catch {
+    return { userName: '', currentUserItems: [] };
+  }
+}
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  // Use refs for toasts to avoid stale closures and memory leaks
+  const sessionId = useRef(getOrCreateSessionId()).current;
+
   const toastsRef = useRef<Toast[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const toastTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
-  
-  // Load persisted state from localStorage
-  const loadPersistedState = (): Partial<AppState> => {
-    if (typeof window === 'undefined') return {};
-    try {
-      const persisted = localStorage.getItem('menuva-state');
-      if (persisted) {
-        const parsed = JSON.parse(persisted);
-        return {
-          userName: parsed.userName || '',
-          hasGroup: parsed.hasGroup || false,
-          groupMembers: parsed.groupMembers || [
-            { id: '1', name: 'Sarah', initials: 'SA', items: [], isCurrentUser: true },
-          ],
-        };
-      }
-    } catch (e) {
-      // Ignore parse errors
-    }
-    return {};
-  };
+  const toastTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  const initialPersisted = loadPersistedState();
+  const { userName: savedName, currentUserItems: savedItems } = loadPersistedState();
 
   const [state, setState] = useState<AppState>({
     screen: 'welcome',
-    userName: initialPersisted.userName || '',
-    hasGroup: initialPersisted.hasGroup || false,
-    groupMembers: initialPersisted.groupMembers || [
-      { id: '1', name: 'Me', initials: 'ME', items: [], isCurrentUser: true },
-    ],
+    userName: savedName,
+    hasGroup: false,
+    groupMembers: [{
+      id: sessionId,
+      name: savedName,
+      initials: savedName ? savedName.substring(0, 2).toUpperCase() : '',
+      items: savedItems,
+      isCurrentUser: true,
+    }],
     selectedItem: null,
     toasts: [],
     orderStatus: 'placed',
@@ -93,272 +110,357 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     selectedCategory: 'All',
   });
 
-  const getCurrentUser = useCallback(() => state.groupMembers.find(m => m.isCurrentUser), [state.groupMembers]);
+  // ─── Toast helpers ──────────────────────────────────────────────────────────
 
-  const setScreen = useCallback((screen: Screen) => setState(s => ({ ...s, screen })), []);
-  
-  const setUserName = useCallback((userName: string) => {
-    setState(s => {
-      // Broadcast that someone joined
-      if (typeof window !== 'undefined' && userName) {
-        try {
-          const bc = new BroadcastChannel('menuva_table');
-          bc.postMessage({ type: 'JOIN', name: userName, time: Date.now() });
-        } catch (e) {}
-      }
-      return { ...s, userName };
-    });
+  const addToast = useCallback((toast: Toast) => {
+    if (toastsRef.current.length >= MAX_TOASTS) {
+      const oldestId = toastsRef.current[0].id;
+      const t = toastTimeoutsRef.current.get(oldestId);
+      if (t) { clearTimeout(t); toastTimeoutsRef.current.delete(oldestId); }
+      toastsRef.current = toastsRef.current.slice(1);
+    }
+    toastsRef.current = [...toastsRef.current, toast];
+    setToasts([...toastsRef.current]);
+    const timeoutId = setTimeout(() => {
+      toastsRef.current = toastsRef.current.filter(t => t.id !== toast.id);
+      setToasts([...toastsRef.current]);
+      toastTimeoutsRef.current.delete(toast.id);
+    }, TOAST_DURATION);
+    toastTimeoutsRef.current.set(toast.id, timeoutId);
   }, []);
-  
-  const setHasGroup = useCallback((hasGroup: boolean) => setState(s => ({ ...s, hasGroup })), []);
 
-  // Listen for other users joining
+  // ─── Server sync ────────────────────────────────────────────────────────────
+
+  const syncCartToServer = useCallback((items: CartItem[]) => {
+    if (typeof window === 'undefined') return;
+    fetch(`/api/table/${TABLE_ID}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'updateCart', memberId: sessionId, items }),
+    }).catch(() => {});
+  }, [sessionId]);
+
+  // One-time fetch on mount to populate other users at the table
+  useEffect(() => {
+    fetch(`/api/table/${TABLE_ID}`)
+      .then(r => r.json())
+      .then((data: { members: GroupMember[] }) => {
+        const others = data.members.filter(m => m.id !== sessionId && m.name);
+        if (others.length > 0) {
+          setState(s => ({
+            ...s,
+            hasGroup: true,
+            groupMembers: [
+              ...s.groupMembers.filter(m => m.isCurrentUser),
+              ...others.map(m => ({ ...m, isCurrentUser: false })),
+            ],
+          }));
+        }
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Polling — only when past the welcome screen
+  useEffect(() => {
+    if (state.screen === 'welcome') return;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/table/${TABLE_ID}`);
+        if (!res.ok) return;
+        const data: { members: GroupMember[]; orderStatus: string } = await res.json();
+
+        setState(s => {
+          const me = s.groupMembers.find(m => m.isCurrentUser);
+          const others = data.members
+            .filter(m => m.id !== sessionId && m.name)
+            .map(m => ({ ...m, isCurrentUser: false }));
+
+          return {
+            ...s,
+            groupMembers: me ? [me, ...others] : others,
+            hasGroup: others.length > 0,
+          };
+        });
+      } catch { /* ignore network errors */ }
+    };
+
+    poll();
+    const id = setInterval(poll, POLL_INTERVAL);
+    return () => clearInterval(id);
+  }, [state.screen, sessionId]);
+
+  // ─── Join / reset ───────────────────────────────────────────────────────────
+
+  const joinTable = useCallback(async (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+
+    const member: GroupMember = {
+      id: sessionId,
+      name: trimmed,
+      initials: trimmed.substring(0, 2).toUpperCase(),
+      items: [],
+      isCurrentUser: true,
+    };
+
+    setState(s => ({
+      ...s,
+      userName: trimmed,
+      groupMembers: s.groupMembers.map(m =>
+        m.isCurrentUser ? member : m
+      ),
+    }));
+
+    // BroadcastChannel for same-device tabs
+    try {
+      const bc = new BroadcastChannel('menuva_table');
+      bc.postMessage({ type: 'JOIN', name: trimmed, id: sessionId });
+      bc.close();
+    } catch { /* ignore */ }
+
+    // Server
+    try {
+      await fetch(`/api/table/${TABLE_ID}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'join', member }),
+      });
+    } catch { /* continue offline */ }
+  }, [sessionId]);
+
+  const resetOrder = useCallback(async () => {
+    // Remove from server table
+    try {
+      await fetch(`/api/table/${TABLE_ID}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'leave', memberId: sessionId }),
+      });
+    } catch { /* ignore */ }
+
+    // Clear persisted state
+    if (typeof window !== 'undefined') {
+      try { localStorage.removeItem('menuva-state'); } catch { /* ignore */ }
+    }
+
+    // Clear all toast timers
+    toastTimeoutsRef.current.forEach(t => clearTimeout(t));
+    toastTimeoutsRef.current.clear();
+    toastsRef.current = [];
+    setToasts([]);
+
+    // Reset to initial
+    setState({
+      screen: 'welcome',
+      userName: '',
+      hasGroup: false,
+      groupMembers: [{ id: sessionId, name: '', initials: '', items: [], isCurrentUser: true }],
+      selectedItem: null,
+      toasts: [],
+      orderStatus: 'placed',
+      showPayment: false,
+      itemQuantity: 1,
+      itemExtras: [],
+      selectedCategory: 'All',
+    });
+  }, [sessionId]);
+
+  // ─── BroadcastChannel (same-device) ────────────────────────────────────────
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const bc = new BroadcastChannel('menuva_table');
     bc.onmessage = (event) => {
-      if (event.data.type === 'JOIN' && event.data.name !== state.userName) {
-        // Check if member already exists to avoid duplicates
-        const existingMember = state.groupMembers.find(m => m.id === event.data.name);
-        if (!existingMember) {
-          setState(s => ({
+      if (event.data.type === 'JOIN' && event.data.id !== sessionId) {
+        setState(s => {
+          if (s.groupMembers.find(m => m.id === event.data.id)) return s;
+          return {
             ...s,
             hasGroup: true,
-            groupMembers: [...s.groupMembers, { id: event.data.name, name: event.data.name, initials: event.data.name.substring(0,2).toUpperCase(), items: [] }]
-          }));
-        }
+            groupMembers: [...s.groupMembers, {
+              id: event.data.id,
+              name: event.data.name,
+              initials: event.data.name.substring(0, 2).toUpperCase(),
+              items: [],
+              isCurrentUser: false,
+            }],
+          };
+        });
       }
     };
     return () => bc.close();
-  }, [state.userName]);
-  
-  const selectItem = useCallback((selectedItem: MenuItem | null) => setState(s => ({ 
-    ...s, 
-    selectedItem, 
-    itemQuantity: 1, 
-    itemExtras: [] 
+  }, [sessionId]);
+
+  // ─── Screen navigation ──────────────────────────────────────────────────────
+
+  const setScreen = useCallback((screen: Screen) => setState(s => ({ ...s, screen })), []);
+
+  const goBack = useCallback(() => {
+    setState(s => {
+      const map: Record<Screen, Screen> = {
+        detail: 'menu',
+        viewer3d: 'detail',
+        order: 'menu',
+        payment: 'waiting',
+        menu: 'welcome',
+        waiting: 'menu',
+        welcome: 'welcome',
+      };
+      return { ...s, screen: map[s.screen] ?? 'menu' };
+    });
+  }, []);
+
+  // ─── Simple state setters ───────────────────────────────────────────────────
+
+  const setUserName = useCallback((userName: string) => setState(s => ({ ...s, userName })), []);
+  const setHasGroup = useCallback((hasGroup: boolean) => setState(s => ({ ...s, hasGroup })), []);
+  const selectItem = useCallback((selectedItem: MenuItem | null) => setState(s => ({
+    ...s, selectedItem, itemQuantity: 1, itemExtras: [],
   })), []);
   const setItemQuantity = useCallback((itemQuantity: number) => setState(s => ({ ...s, itemQuantity })), []);
   const setSelectedCategory = useCallback((selectedCategory: string) => setState(s => ({ ...s, selectedCategory })), []);
   const setOrderStatus = useCallback((orderStatus: string) => setState(s => ({ ...s, orderStatus })), []);
   const setShowPayment = useCallback((showPayment: boolean) => setState(s => ({ ...s, showPayment })), []);
+  const addItemExtra = useCallback((extraId: string) => setState(s => ({
+    ...s, itemExtras: s.itemExtras.includes(extraId) ? s.itemExtras : [...s.itemExtras, extraId],
+  })), []);
+  const removeItemExtra = useCallback((extraId: string) => setState(s => ({
+    ...s, itemExtras: s.itemExtras.filter(e => e !== extraId),
+  })), []);
 
-  const addItemExtra = useCallback((extraId: string) => {
-    setState(s => ({
-      ...s,
-      itemExtras: s.itemExtras.includes(extraId) 
-        ? s.itemExtras 
-        : [...s.itemExtras, extraId]
-    }));
-  }, []);
-
-  const removeItemExtra = useCallback((extraId: string) => {
-    setState(s => ({
-      ...s,
-      itemExtras: s.itemExtras.filter(e => e !== extraId)
-    }));
-  }, []);
+  // ─── Cart ───────────────────────────────────────────────────────────────────
 
   const addToCart = useCallback((item: MenuItem, quantity: number, extras: string[]) => {
-    const newItem: CartItem = { ...item, quantity, extras };
     setState(s => {
-      const user = s.groupMembers.find(m => m.isCurrentUser);
-      if (!user) return s;
-      const userName = user.name;
-      const existingIdx = user.items.findIndex(i => i.id === item.id && JSON.stringify(i.extras) === JSON.stringify(extras));
+      const me = s.groupMembers.find(m => m.isCurrentUser);
+      if (!me) return s;
+
+      const existingIdx = me.items.findIndex(
+        i => i.id === item.id && JSON.stringify(i.extras) === JSON.stringify(extras)
+      );
+
       let newItems: CartItem[];
       if (existingIdx >= 0) {
-        newItems = [...user.items];
-        newItems[existingIdx] = { ...newItems[existingIdx], quantity: newItems[existingIdx].quantity + quantity };
+        newItems = me.items.map((i, idx) =>
+          idx === existingIdx ? { ...i, quantity: i.quantity + quantity } : i
+        );
       } else {
-        newItems = [...user.items, newItem];
+        newItems = [...me.items, { ...item, quantity, extras }];
       }
-      
-      // Limit toasts to prevent memory bloat - remove oldest if at limit
-      if (toastsRef.current.length >= MAX_TOASTS) {
-        const oldestId = toastsRef.current[0].id;
-        const oldTimeout = toastTimeoutsRef.current.get(oldestId);
-        if (oldTimeout) {
-          clearTimeout(oldTimeout);
-          toastTimeoutsRef.current.delete(oldestId);
-        }
-        toastsRef.current = toastsRef.current.slice(1);
-      }
-      
-      // Show toast using ref to avoid re-renders
-      const toastId = Date.now().toString();
-      const newToast: Toast = { id: toastId, message: `${userName} added ${item.name}`, success: true };
-      toastsRef.current = [...toastsRef.current, newToast];
-      setToasts([...toastsRef.current]);
-      
-      // Auto-dismiss toast after 3 seconds
-      const timeoutId = setTimeout(() => {
-        toastsRef.current = toastsRef.current.filter(t => t.id !== toastId);
-        setToasts([...toastsRef.current]);
-        toastTimeoutsRef.current.delete(toastId);
-      }, TOAST_DURATION);
-      toastTimeoutsRef.current.set(toastId, timeoutId);
-      
+
+      addToast({ id: Date.now().toString(), message: `${me.name || 'You'} added ${item.name}`, success: true });
+      syncCartToServer(newItems);
+
       return {
         ...s,
-        groupMembers: s.groupMembers.map(m => m.isCurrentUser ? { ...m, items: newItems } : m)
+        groupMembers: s.groupMembers.map(m => m.isCurrentUser ? { ...m, items: newItems } : m),
       };
     });
-  }, []);
+  }, [addToast, syncCartToServer]);
 
   const removeFromCart = useCallback((itemId: string) => {
-    setState(s => ({
-      ...s,
-      groupMembers: s.groupMembers.map(m => m.isCurrentUser 
-        ? { ...m, items: m.items.filter(i => i.id !== itemId) }
-        : m
-      )
-    }));
-  }, []);
+    setState(s => {
+      const newMembers = s.groupMembers.map(m =>
+        m.isCurrentUser ? { ...m, items: m.items.filter(i => i.id !== itemId) } : m
+      );
+      const me = newMembers.find(m => m.isCurrentUser);
+      if (me) syncCartToServer(me.items);
+      return { ...s, groupMembers: newMembers };
+    });
+  }, [syncCartToServer]);
+
+  const decrementFromCart = useCallback((itemId: string) => {
+    setState(s => {
+      const newMembers = s.groupMembers.map(m => {
+        if (!m.isCurrentUser) return m;
+        const item = m.items.find(i => i.id === itemId);
+        if (!item) return m;
+        const newItems = item.quantity <= 1
+          ? m.items.filter(i => i.id !== itemId)
+          : m.items.map(i => i.id === itemId ? { ...i, quantity: i.quantity - 1 } : i);
+        return { ...m, items: newItems };
+      });
+      const me = newMembers.find(m => m.isCurrentUser);
+      if (me) syncCartToServer(me.items);
+      return { ...s, groupMembers: newMembers };
+    });
+  }, [syncCartToServer]);
+
+  const getCurrentUser = useCallback(() =>
+    state.groupMembers.find(m => m.isCurrentUser), [state.groupMembers]);
 
   const getCartCount = useCallback(() => {
-    const user = getCurrentUser();
-    // Use simple reduce instead of memoize
-    return user ? user.items.reduce((sum, i) => sum + i.quantity, 0) : 0;
+    const u = getCurrentUser();
+    return u ? u.items.reduce((sum, i) => sum + i.quantity, 0) : 0;
   }, [getCurrentUser]);
 
   const getCartTotal = useCallback(() => {
-    const user = getCurrentUser();
-    // Use simple reduce instead of memoize
-    return user ? user.items.reduce((sum, i) => sum + (i.price * i.quantity), 0) : 0;
+    const u = getCurrentUser();
+    return u ? u.items.reduce((sum, i) => sum + i.price * i.quantity, 0) : 0;
   }, [getCurrentUser]);
 
   const showToast = useCallback((message: string, initials?: string, success?: boolean) => {
-    // Limit toasts to prevent memory bloat - remove oldest if at limit
-    if (toastsRef.current.length >= MAX_TOASTS) {
-      const oldestId = toastsRef.current[0].id;
-      const oldTimeout = toastTimeoutsRef.current.get(oldestId);
-      if (oldTimeout) {
-        clearTimeout(oldTimeout);
-        toastTimeoutsRef.current.delete(oldestId);
-      }
-      toastsRef.current = toastsRef.current.slice(1);
-    }
-    
-    const id = Date.now().toString();
-    const newToast: Toast = { id, message, initials, success };
-    toastsRef.current = [...toastsRef.current, newToast];
-    setToasts([...toastsRef.current]);
-    
-    // Auto-dismiss with cleanup
-    const timeoutId = setTimeout(() => {
-      toastsRef.current = toastsRef.current.filter(t => t.id !== id);
-      setToasts([...toastsRef.current]);
-      toastTimeoutsRef.current.delete(id);
-    }, TOAST_DURATION);
-    toastTimeoutsRef.current.set(id, timeoutId);
-  }, []);
+    addToast({ id: Date.now().toString(), message, initials, success });
+  }, [addToast]);
 
   const dismissToast = useCallback((id: string) => {
-    // Clear timeout if exists
-    const timeout = toastTimeoutsRef.current.get(id);
-    if (timeout) {
-      clearTimeout(timeout);
-      toastTimeoutsRef.current.delete(id);
-    }
-    // Remove toast
+    const t = toastTimeoutsRef.current.get(id);
+    if (t) { clearTimeout(t); toastTimeoutsRef.current.delete(id); }
     toastsRef.current = toastsRef.current.filter(t => t.id !== id);
     setToasts([...toastsRef.current]);
   }, []);
 
-  const goBack = useCallback(() => {
-    const screenMap: Record<Screen, Screen> = {
-      'detail': 'menu',
-      'viewer3d': 'detail',
-      'order': 'menu',
-      'payment': 'order',
-      'menu': 'welcome',
-      'waiting': 'menu',
-      'welcome': 'welcome',
-    };
-    setScreen(screenMap[state.screen] || 'menu');
-  }, [state.screen, setScreen]);
+  // ─── Persist current user to localStorage ──────────────────────────────────
 
-  useEffect(() => {
-    if (state.userName && state.screen === 'welcome') {
-      const name = state.userName.trim();
-      if (name.length > 0) {
-        setState(s => ({
-          ...s,
-          groupMembers: s.groupMembers.map(m => m.isCurrentUser 
-            ? { ...m, name, initials: name.substring(0, 2).toUpperCase() }
-            : m
-          )
-        }));
-      }
-    }
-  }, [state.userName, state.screen]);
-
-  // Persist cart and user to localStorage
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      const toPersist = {
+      localStorage.setItem('menuva-state', JSON.stringify({
         userName: state.userName,
-        hasGroup: state.hasGroup,
-        groupMembers: state.groupMembers.map(m => ({
-          id: m.id,
-          name: m.name,
-          initials: m.initials,
-          items: m.items,
-          isCurrentUser: m.isCurrentUser,
-        })),
-      };
-      localStorage.setItem('menuva-state', JSON.stringify(toPersist));
-    } catch (e) {
-      // Ignore storage errors
-    }
-  }, [state.userName, state.hasGroup, state.groupMembers]);
+        groupMembers: state.groupMembers,
+      }));
+    } catch { /* ignore */ }
+  }, [state.userName, state.groupMembers]);
 
   // Cleanup toasts on unmount
-  useEffect(() => {
-    return () => {
-      // Clear all toast timeouts
-      toastTimeoutsRef.current.forEach(timeout => clearTimeout(timeout));
-      toastTimeoutsRef.current.clear();
-      toastsRef.current = [];
-    };
+  useEffect(() => () => {
+    toastTimeoutsRef.current.forEach(t => clearTimeout(t));
   }, []);
 
-  // Sync ref with state for toasts
-  const toastsState = {
+  const value: AppContextType = {
     ...state,
     toasts,
+    sessionId,
+    tableId: TABLE_ID,
+    setScreen,
+    setUserName,
+    setHasGroup,
+    selectItem,
+    addToCart,
+    removeFromCart,
+    decrementFromCart,
+    getCartTotal,
+    getCartCount,
+    showToast,
+    dismissToast,
+    setOrderStatus,
+    setShowPayment,
+    setItemQuantity,
+    addItemExtra,
+    removeItemExtra,
+    setSelectedCategory,
+    goBack,
+    joinTable,
+    resetOrder,
   };
 
-  return (
-    <AppContext.Provider value={{
-      ...toastsState,
-      setScreen,
-      setUserName,
-      setHasGroup,
-      selectItem,
-      addToCart,
-      removeFromCart,
-      getCartTotal,
-      getCartCount,
-      showToast,
-      dismissToast,
-      setOrderStatus,
-      setShowPayment,
-      setItemQuantity,
-      addItemExtra,
-      removeItemExtra,
-      setSelectedCategory,
-      goBack,
-    }}>
-      {children}
-    </AppContext.Provider>
-  );
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 
 export function useApp() {
-  const context = useContext(AppContext);
-  if (!context) throw new Error('useApp must be used within AppProvider');
-  return context;
+  const ctx = useContext(AppContext);
+  if (!ctx) throw new Error('useApp must be used within AppProvider');
+  return ctx;
 }
