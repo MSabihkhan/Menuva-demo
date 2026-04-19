@@ -25,8 +25,10 @@ async function getKvTable(tableId: string): Promise<TableState | null> {
     const { kv } = await import('@vercel/kv');
     const key = `${TABLE_KEY_PREFIX}${tableId}`;
     const data = await kv.get<TableState>(key);
+    console.log('[KV] GET:', key, data ? 'found' : 'not found');
     return data;
-  } catch {
+  } catch (e) {
+    console.log('[KV] GET error:', e);
     return null;
   }
 }
@@ -36,7 +38,9 @@ async function setKvTable(tableId: string, state: TableState): Promise<void> {
     const { kv } = await import('@vercel/kv');
     const key = `${TABLE_KEY_PREFIX}${tableId}`;
     await kv.set(key, state, { ex: 86400 });
-  } catch {
+    console.log('[KV] SET:', key, 'success');
+  } catch (e) {
+    console.log('[KV] SET error:', e);
     // Fallback to in-memory
   }
 }
