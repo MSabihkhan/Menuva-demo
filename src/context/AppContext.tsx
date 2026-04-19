@@ -1,9 +1,13 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, memo } from 'react';
 import { CartItem, GroupMember, Toast, MENU_ITEMS, MenuItem } from '@/data/menu';
 
 type Screen = 'welcome' | 'menu' | 'detail' | 'viewer3d' | 'order' | 'waiting' | 'payment';
+
+// Maximum toasts to prevent memory accumulation
+const MAX_TOASTS = 3;
+const TOAST_DURATION = 3000;
 
 interface AppState {
   screen: Screen;
@@ -41,7 +45,15 @@ interface AppContextType extends AppState {
 
 const AppContext = createContext<AppContextType | null>(null);
 
+// Helper functions for cart calculations (using React.useMemo in components)
+// These are simple pure functions, no need for memoization at this level
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
+  // Use refs for toasts to avoid stale closures and memory leaks
+  const toastsRef = useRef<Toast[]>([]);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const toastTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  
   // Load persisted state from localStorage
   const loadPersistedState = (): Partial<AppState> => {
     if (typeof window === 'undefined') return {};
@@ -64,8 +76,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const initialPersisted = loadPersistedState();
-
-  const getInitialials = (name: string) => name ? name.substring(0, 2).toUpperCase() : 'ME';
 
   const [state, setState] = useState<AppState>({
     screen: 'welcome',
@@ -163,7 +173,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } else {
         newItems = [...user.items, newItem];
       }
-      setTimeout(() => showToast(`${userName} added ${item.name} · PKR ${item.price}`), 0);
+      
+      // Limit toasts to prevent memory bloat - remove oldest if at limit
+      if (toastsRef.current.length >= MAX_TOASTS) {
+        const oldestId = toastsRef.current[0].id;
+        const oldTimeout = toastTimeoutsRef.current.get(oldestId);
+        if (oldTimeout) {
+          clearTimeout(oldTimeout);
+          toastTimeoutsRef.current.delete(oldestId);
+        }
+        toastsRef.current = toastsRef.current.slice(1);
+      }
+      
+      // Show toast using ref to avoid re-renders
+      const toastId = Date.now().toString();
+      const newToast: Toast = { id: toastId, message: `${userName} added ${item.name}`, success: true };
+      toastsRef.current = [...toastsRef.current, newToast];
+      setToasts([...toastsRef.current]);
+      
+      // Auto-dismiss toast after 3 seconds
+      const timeoutId = setTimeout(() => {
+        toastsRef.current = toastsRef.current.filter(t => t.id !== toastId);
+        setToasts([...toastsRef.current]);
+        toastTimeoutsRef.current.delete(toastId);
+      }, TOAST_DURATION);
+      toastTimeoutsRef.current.set(toastId, timeoutId);
+      
       return {
         ...s,
         groupMembers: s.groupMembers.map(m => m.isCurrentUser ? { ...m, items: newItems } : m)
@@ -182,32 +217,53 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const getCartCount = useCallback(() => {
-    return getCurrentUser()?.items.reduce((sum, i) => sum + i.quantity, 0) || 0;
+    const user = getCurrentUser();
+    // Use simple reduce instead of memoize
+    return user ? user.items.reduce((sum, i) => sum + i.quantity, 0) : 0;
   }, [getCurrentUser]);
 
   const getCartTotal = useCallback(() => {
-    return getCurrentUser()?.items.reduce((sum, i) => sum + (i.price * i.quantity), 0) || 0;
+    const user = getCurrentUser();
+    // Use simple reduce instead of memoize
+    return user ? user.items.reduce((sum, i) => sum + (i.price * i.quantity), 0) : 0;
   }, [getCurrentUser]);
 
   const showToast = useCallback((message: string, initials?: string, success?: boolean) => {
+    // Limit toasts to prevent memory bloat - remove oldest if at limit
+    if (toastsRef.current.length >= MAX_TOASTS) {
+      const oldestId = toastsRef.current[0].id;
+      const oldTimeout = toastTimeoutsRef.current.get(oldestId);
+      if (oldTimeout) {
+        clearTimeout(oldTimeout);
+        toastTimeoutsRef.current.delete(oldestId);
+      }
+      toastsRef.current = toastsRef.current.slice(1);
+    }
+    
     const id = Date.now().toString();
-    setState(s => ({
-      ...s,
-      toasts: [...s.toasts, { id, message, initials, success }]
-    }));
-    setTimeout(() => {
-      setState(s => ({
-        ...s,
-        toasts: s.toasts.filter(t => t.id !== id)
-      }));
-    }, 3000);
+    const newToast: Toast = { id, message, initials, success };
+    toastsRef.current = [...toastsRef.current, newToast];
+    setToasts([...toastsRef.current]);
+    
+    // Auto-dismiss with cleanup
+    const timeoutId = setTimeout(() => {
+      toastsRef.current = toastsRef.current.filter(t => t.id !== id);
+      setToasts([...toastsRef.current]);
+      toastTimeoutsRef.current.delete(id);
+    }, TOAST_DURATION);
+    toastTimeoutsRef.current.set(id, timeoutId);
   }, []);
 
   const dismissToast = useCallback((id: string) => {
-    setState(s => ({
-      ...s,
-      toasts: s.toasts.filter(t => t.id !== id)
-    }));
+    // Clear timeout if exists
+    const timeout = toastTimeoutsRef.current.get(id);
+    if (timeout) {
+      clearTimeout(timeout);
+      toastTimeoutsRef.current.delete(id);
+    }
+    // Remove toast
+    toastsRef.current = toastsRef.current.filter(t => t.id !== id);
+    setToasts([...toastsRef.current]);
   }, []);
 
   const goBack = useCallback(() => {
@@ -259,9 +315,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [state.userName, state.hasGroup, state.groupMembers]);
 
+  // Cleanup toasts on unmount
+  useEffect(() => {
+    return () => {
+      // Clear all toast timeouts
+      toastTimeoutsRef.current.forEach(timeout => clearTimeout(timeout));
+      toastTimeoutsRef.current.clear();
+      toastsRef.current = [];
+    };
+  }, []);
+
+  // Sync ref with state for toasts
+  const toastsState = {
+    ...state,
+    toasts,
+  };
+
   return (
     <AppContext.Provider value={{
-      ...state,
+      ...toastsState,
       setScreen,
       setUserName,
       setHasGroup,
