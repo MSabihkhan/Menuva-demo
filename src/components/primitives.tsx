@@ -62,16 +62,17 @@ export function BackButton({ onClick, dark }: { onClick?: () => void; dark?: boo
     <div 
       onClick={onClick}
       style={{
-        position: 'absolute', top: 44, left: 16, zIndex: 10,
-        width: 36, height: 36, borderRadius: '50%',
-        background: dark ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.72)',
+        position: 'fixed', top: 12, left: 16, zIndex: 100,
+        width: 40, height: 40, borderRadius: '50%',
+        background: dark ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.85)',
         backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         cursor: 'pointer',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
       }}
     >
-      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-        <path d="M12 5L7 10l5 5" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+        <path d="M15 6L9 12l6 6" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
       </svg>
     </div>
   );

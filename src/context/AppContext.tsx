@@ -108,11 +108,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const bc = new BroadcastChannel('menuva_table');
     bc.onmessage = (event) => {
       if (event.data.type === 'JOIN' && event.data.name !== state.userName) {
-        setState(s => ({
-          ...s,
-          hasGroup: true,
-          groupMembers: [...s.groupMembers, { id: event.data.name, name: event.data.name, initials: event.data.name.substring(0,2).toUpperCase(), items: [] }]
-        }));
+        // Check if member already exists to avoid duplicates
+        const existingMember = state.groupMembers.find(m => m.id === event.data.name);
+        if (!existingMember) {
+          setState(s => ({
+            ...s,
+            hasGroup: true,
+            groupMembers: [...s.groupMembers, { id: event.data.name, name: event.data.name, initials: event.data.name.substring(0,2).toUpperCase(), items: [] }]
+          }));
+        }
       }
     };
     return () => bc.close();

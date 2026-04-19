@@ -22,8 +22,8 @@
 
   --header-height: 44px;
   --home-indicator: 34px;
-  --screen-width: 390px;
-  --screen-height: 844px;
+  --min-screen-width: 320px;
+  --max-screen-width: 430px;
 }
 
 * {
@@ -36,9 +36,11 @@ html, body {
   margin: 0;
   padding: 0;
   min-height: 100vh;
+  min-width: var(--min-screen-width);
   background: var(--canvas);
   color: var(--ink);
   font-family: var(--font-sans);
+  overflow-x: hidden;
 }
 
 body {
@@ -47,17 +49,54 @@ body {
 }
 
 #screen-container {
-  width: var(--screen-width);
+  width: 100%;
+  min-width: var(--min-screen-width);
+  max-width: var(--max-screen-width);
   min-height: 100vh;
   background: var(--bg);
   position: relative;
   box-shadow: 0 0 40px rgba(0,0,0,0.08);
 }
 
+/* Responsive breakpoints for different devices */
+@media (min-width: 320px) {
+  #screen-container {
+    width: 100%;
+  }
+}
+
+@media (min-width: 375px) {
+  #screen-container {
+    width: 100%;
+  }
+}
+
+@media (min-width: 414px) {
+  #screen-container {
+    width: 100%;
+  }
+}
+
+@media (min-width: 430px) {
+  #screen-container {
+    max-width: 430px;
+    margin: 0 auto;
+    box-shadow: 0 0 60px rgba(0,0,0,0.12);
+  }
+}
+
+/* Landscape mode */
+@media (max-height: 500px) and (orientation: landscape) {
+  #screen-container {
+    min-height: 100vh;
+  }
+}
+
 .screen {
   position: absolute;
   inset: 0;
   background: var(--bg);
+  overflow-x: hidden;
 }
 
 .glass {
@@ -79,11 +118,41 @@ button {
   cursor: pointer;
   border: none;
   outline: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 input {
   font-family: var(--font-sans);
   outline: none;
+  touch-action: manipulation;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent horizontal scroll */
+body, html {
+  overflow-x: hidden;
+}
+
+/* Touch-friendly interactions */
+@media (pointer: coarse) {
+  button, a, [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Safe area for notched phones */
+@supports (padding: max(0px)) {
+  body {
+    padding-left: max(0px, env(safe-area-inset-left));
+    padding-right: max(0px, env(safe-area-inset-right));
+  }
 }
 
 @keyframes spin {
@@ -93,6 +162,16 @@ input {
 @keyframes pulse {
   0%, 100% { opacity: 0.6; }
   50% { opacity: 1; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
 }
 
 .sr-only {
