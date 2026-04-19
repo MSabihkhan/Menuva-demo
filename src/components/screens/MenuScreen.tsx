@@ -64,7 +64,15 @@ const CategoryTabs = memo(function CategoryTabs() {
       scrollbarWidth: 'none',
     }}>
       {CATEGORIES.map(cat => (
-        <MemoChip
+        <MemoChip style={{ 
+              cursor: 'pointer',
+              flexShrink: 0, // Prevent chips from squishing on small screens
+              transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+              // High-end touch: slight lift and shadow on the active tab
+              transform: selectedCategory === cat ? 'translateY(-1px)' : 'none',
+              filter: selectedCategory === cat ? 'drop-shadow(0 4px 8px rgba(0,0,0,0.1))' : 'none',
+              userSelect: 'none'
+            }}
           key={cat}
           active={selectedCategory === cat}
           muted={selectedCategory !== cat}
