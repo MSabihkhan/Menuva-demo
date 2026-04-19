@@ -149,6 +149,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     fetch(`/api/table/${TABLE_ID}`)
       .then(r => r.json())
       .then((data: { members: GroupMember[] }) => {
+        console.log('[APP] Initial fetch, members:', data.members.map(m => m.name));
         const others = data.members.filter(m => m.id !== sessionId && m.name);
         if (others.length > 0) {
           setState(s => ({
