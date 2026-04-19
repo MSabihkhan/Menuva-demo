@@ -10,84 +10,57 @@ interface TableState {
 const TABLE_KEY_PREFIX = 'menuva:table:';
 const STALE_MS = 4 * 60 * 60 * 1000;
 
-const inMemoryStore: Map<string, TableState> = new Map();
+// Survive warm lambda instances — module-level Map resets on cold start
+declare const globalThis: typeof global & { __menuvaStore?: Map<string, TableState> };
+if (!globalThis.__menuvaStore) globalThis.__menuvaStore = new Map();
+const inMemoryStore = globalThis.__menuvaStore;
 
-function getInMemoryTable(tableId: string): TableState {
-  return inMemoryStore.get(tableId) ?? { members: [], orderStatus: 'idle', updatedAt: 0 };
-}
-
-function setInMemoryTable(tableId: string, state: TableState): void {
-  inMemoryStore.set(tableId, state);
-}
-
-async function getKvTable(tableId: string): Promise<TableState | null> {
-  try {
-    const { kv } = await import('@vercel/kv');
-    const key = `${TABLE_KEY_PREFIX}${tableId}`;
-    const data = await kv.get<TableState>(key);
-    return data ?? null;
-  } catch {
-    // Fallback to in-memory
-    return null;
-  }
-}
-
-async function setKvTable(tableId: string, state: TableState): Promise<void> {
-  try {
-    const { kv } = await import('@vercel/kv');
-    const key = `${TABLE_KEY_PREFIX}${tableId}`;
-    await kv.set(key, state, { ex: 86400 });
-  } catch {
-    // Fallback to in-memory
-  }
-}
+const KV_AVAILABLE = !!(
+  process.env.KV_REST_API_URL &&
+  process.env.KV_REST_API_TOKEN
+);
 
 async function getTable(tableId: string): Promise<TableState> {
-  const kvData = await getKvTable(tableId);
-  if (kvData) return kvData;
-  return getInMemoryTable(tableId);
+  if (KV_AVAILABLE) {
+    try {
+      const { kv } = await import('@vercel/kv');
+      const data = await kv.get<TableState>(`${TABLE_KEY_PREFIX}${tableId}`);
+      if (data) return data;
+    } catch { /* fall through */ }
+  }
+  return inMemoryStore.get(tableId) ?? { members: [], orderStatus: 'idle', updatedAt: 0 };
 }
 
 async function saveTable(tableId: string, state: TableState): Promise<void> {
   state.updatedAt = Date.now();
-  setInMemoryTable(tableId, state);
-  await setKvTable(tableId, state);
+  inMemoryStore.set(tableId, state);
+  if (KV_AVAILABLE) {
+    try {
+      const { kv } = await import('@vercel/kv');
+      await kv.set(`${TABLE_KEY_PREFIX}${tableId}`, state, { ex: 86400 });
+    } catch { /* in-memory already saved above */ }
+  }
 }
 
-function pruneTable(tableId: string, state: TableState): TableState {
-  const now = Date.now();
-  if (now - state.updatedAt > STALE_MS) {
-    return { members: [], orderStatus: 'idle', updatedAt: now };
+function pruneStale(state: TableState): TableState {
+  if (Date.now() - state.updatedAt > STALE_MS) {
+    return { members: [], orderStatus: 'idle', updatedAt: Date.now() };
   }
   return state;
 }
 
 type Params = { tableId: string } | Promise<{ tableId: string }>;
 
-async function resolveTableId(params: Params): Promise<string> {
-  const p = await Promise.resolve(params);
-  return p.tableId;
-}
-
 export async function GET(
   _req: NextRequest,
   { params }: { params: Params }
 ) {
-  const tableId = await resolveTableId(params);
-  let s = await getTable(tableId);
-  s = pruneTable(tableId, s);
-  
-  // Check if KV is available
-  let kvAvailable = false;
-  try {
-    const { kv } = await import('@vercel/kv');
-    kvAvailable = !!kv;
-  } catch {}
-  
-  return NextResponse.json({ 
-    members: s.members, 
+  const { tableId } = await Promise.resolve(params);
+  const s = pruneStale(await getTable(tableId));
+  return NextResponse.json({
+    members: s.members,
     orderStatus: s.orderStatus,
-    debug: `KV:${kvAvailable ? 'ON' : 'OFF'}`
+    debug: `KV:${KV_AVAILABLE ? 'ON' : 'OFF'}`,
   });
 }
 
@@ -95,7 +68,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Params }
 ) {
-  const tableId = await resolveTableId(params);
+  const { tableId } = await Promise.resolve(params);
   const body = await req.json() as {
     action: 'join' | 'updateCart' | 'placeOrder' | 'reset' | 'leave';
     member?: GroupMember;
@@ -103,8 +76,7 @@ export async function POST(
     items?: GroupMember['items'];
   };
 
-  let s = await getTable(tableId);
-  s = pruneTable(tableId, s);
+  const s = pruneStale(await getTable(tableId));
 
   switch (body.action) {
     case 'join': {
