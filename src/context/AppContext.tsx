@@ -89,6 +89,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const toastsRef = useRef<Toast[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const prevOthersRef = useRef<GroupMember[]>([]);
   const toastTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const { userName: savedName, currentUserItems: savedItems } = loadPersistedState();
@@ -167,29 +168,50 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Polling — only when past the welcome screen
+  // Polling — runs on all screens (detects joiners even from welcome)
   useEffect(() => {
-    if (state.screen === 'welcome') return;
-
     const poll = async () => {
       try {
         const res = await fetch(`/api/table/${TABLE_ID}`);
         if (!res.ok) return;
         const data: { members: GroupMember[]; orderStatus: string } = await res.json();
 
+        const others = data.members
+          .filter(m => m.id !== sessionId && m.name)
+          .map(m => ({ ...m, isCurrentUser: false }));
+
+        const prevOthers = prevOthersRef.current;
+
+        // Toast when any other member adds a new item
+        for (const other of others) {
+          const prev = prevOthers.find(p => p.id === other.id);
+          if (prev) {
+            for (const item of other.items) {
+              const prevQty = prev.items.find(i => i.id === item.id)?.quantity ?? 0;
+              if (item.quantity > prevQty) {
+                addToast({
+                  id: `${other.id}-${item.id}-${Date.now()}`,
+                  message: `${other.name} added ${item.name}`,
+                  success: true,
+                });
+              }
+            }
+          }
+        }
+
+        prevOthersRef.current = others;
+
         setState(s => {
           const me = s.groupMembers.find(m => m.isCurrentUser);
-          const currentOthers = s.groupMembers.filter(m => !m.isCurrentUser && m.name);
-          const others = data.members
-            .filter(m => m.id !== sessionId && m.name)
-            .map(m => ({ ...m, isCurrentUser: false }));
 
-          // Detect new joiner
-          let newJoiner: { name: string; initials: string } | null = null;
-          for (const other of others) {
-            if (!currentOthers.find(o => o.id === other.id)) {
-              newJoiner = { name: other.name, initials: other.initials };
-              break;
+          // Detect first new joiner not yet shown
+          let newJoiner = s.newJoiner;
+          if (!newJoiner) {
+            for (const other of others) {
+              if (!prevOthers.find(p => p.id === other.id)) {
+                newJoiner = { name: other.name, initials: other.initials };
+                break;
+              }
             }
           }
 
@@ -197,7 +219,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             ...s,
             groupMembers: me ? [me, ...others] : others,
             hasGroup: others.length > 0,
-            ...(newJoiner && !s.newJoiner ? { newJoiner } : {}),
+            orderStatus: data.orderStatus || s.orderStatus,
+            newJoiner,
           };
         });
       } catch { /* ignore network errors */ }
@@ -206,7 +229,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     poll();
     const id = setInterval(poll, POLL_INTERVAL);
     return () => clearInterval(id);
-  }, [state.screen, sessionId]);
+  }, [sessionId, addToast]);
 
   // ─── Join / reset ───────────────────────────────────────────────────────────
 
