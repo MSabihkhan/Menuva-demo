@@ -17,6 +17,7 @@ interface AppState {
   groupMembers: GroupMember[];
   selectedItem: MenuItem | null;
   toasts: Toast[];
+  newJoiner: { name: string; initials: string } | null;
   orderStatus: string;
   showPayment: boolean;
   itemQuantity: number;
@@ -27,6 +28,7 @@ interface AppState {
 interface AppContextType extends AppState {
   sessionId: string;
   tableId: string;
+  newJoiner: { name: string; initials: string } | null;
   setScreen: (s: Screen) => void;
   setUserName: (name: string) => void;
   setHasGroup: (has: boolean) => void;
@@ -44,6 +46,7 @@ interface AppContextType extends AppState {
   addItemExtra: (extraId: string) => void;
   removeItemExtra: (extraId: string) => void;
   setSelectedCategory: (cat: string) => void;
+  clearNewJoiner: () => void;
   goBack: () => void;
   joinTable: (name: string) => Promise<void>;
   resetOrder: () => Promise<void>;
@@ -103,6 +106,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }],
     selectedItem: null,
     toasts: [],
+    newJoiner: null,
     orderStatus: 'placed',
     showPayment: false,
     itemQuantity: 1,
@@ -173,14 +177,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         setState(s => {
           const me = s.groupMembers.find(m => m.isCurrentUser);
+          const currentOthers = s.groupMembers.filter(m => !m.isCurrentUser && m.name);
           const others = data.members
             .filter(m => m.id !== sessionId && m.name)
             .map(m => ({ ...m, isCurrentUser: false }));
+
+          // Detect new joiner
+          let newJoiner: { name: string; initials: string } | null = null;
+          for (const other of others) {
+            if (!currentOthers.find(o => o.id === other.id)) {
+              newJoiner = { name: other.name, initials: other.initials };
+              break;
+            }
+          }
 
           return {
             ...s,
             groupMembers: me ? [me, ...others] : others,
             hasGroup: others.length > 0,
+            ...(newJoiner && !s.newJoiner ? { newJoiner } : {}),
           };
         });
       } catch { /* ignore network errors */ }
@@ -259,6 +274,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       groupMembers: [{ id: sessionId, name: '', initials: '', items: [], isCurrentUser: true }],
       selectedItem: null,
       toasts: [],
+      newJoiner: null,
       orderStatus: 'placed',
       showPayment: false,
       itemQuantity: 1,
@@ -329,6 +345,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const removeItemExtra = useCallback((extraId: string) => setState(s => ({
     ...s, itemExtras: s.itemExtras.filter(e => e !== extraId),
   })), []);
+  const clearNewJoiner = useCallback(() => setState(s => ({ ...s, newJoiner: null })), []);
 
   // ─── Cart ───────────────────────────────────────────────────────────────────
 
@@ -429,11 +446,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     toastTimeoutsRef.current.forEach(t => clearTimeout(t));
   }, []);
 
+  // Cleanup: remove user from table on tab close
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
+    const handleBeforeUnload = () => {
+      navigator.sendBeacon(`/api/table/${TABLE_ID}`, JSON.stringify({ action: 'leave', memberId: sessionId }));
+    };
+    
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [sessionId]);
+
   const value: AppContextType = {
     ...state,
     toasts,
     sessionId,
     tableId: TABLE_ID,
+    newJoiner: state.newJoiner,
     setScreen,
     setUserName,
     setHasGroup,
@@ -451,6 +481,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     addItemExtra,
     removeItemExtra,
     setSelectedCategory,
+    clearNewJoiner,
     goBack,
     joinTable,
     resetOrder,

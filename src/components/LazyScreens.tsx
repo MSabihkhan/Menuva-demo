@@ -91,6 +91,8 @@ type Screen = 'welcome' | 'menu' | 'detail' | 'viewer3d' | 'order' | 'waiting' |
 interface OptimizedAppProps {
   screen: Screen;
   showPayment: boolean;
+  newJoiner: { name: string; initials: string } | null;
+  clearNewJoiner: () => void;
   goBack: () => void;
   setScreen: (screen: Screen) => void;
 }
@@ -105,7 +107,58 @@ const SCREEN_MAP: Record<Screen, React.ComponentType> = {
   payment: PaymentScreen,
 };
 
-export function OptimizedApp({ screen }: OptimizedAppProps) {
+function JoinerPopup({ joiner, onDismiss }: { 
+  joiner: { name: string; initials: string }; 
+  onDismiss: () => void;
+}) {
+  React.useEffect(() => {
+    const t = setTimeout(onDismiss, 4000);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
+
+  return (
+    <div style={{
+      position: 'absolute', top: 60, left: 16, right: 16, zIndex: 100,
+      background: 'rgba(255,255,255,0.95)',
+      backdropFilter: 'blur(20px) saturate(180%)',
+      WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+      borderRadius: 16, border: '1px solid var(--border)',
+      padding: '14px 16px',
+      display: 'flex', alignItems: 'center', gap: 12,
+      boxShadow: '0 4px 24px rgba(0,0,0,0.12)',
+      animation: 'slideDownIn 0.3s ease',
+    }}>
+      <div style={{
+        width: 44, height: 44, borderRadius: '50%',
+        background: 'var(--accent-surface)', color: 'var(--accent)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 14,
+        flexShrink: 0,
+      }}>{joiner.initials}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 15, color: 'var(--ink)' }}>
+          {joiner.name} joined!
+        </div>
+        <div style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--ink-2)', marginTop: 2 }}>
+          They're now ordering with you
+        </div>
+      </div>
+      <button
+        onClick={onDismiss}
+        style={{
+          width: 28, height: 28, borderRadius: '50%',
+          background: 'var(--surface)', border: 'none',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', fontSize: 18, color: 'var(--ink-3)',
+        }}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+export function OptimizedApp({ screen, newJoiner, clearNewJoiner }: OptimizedAppProps) {
   const [isPending] = useTransition();
   useScreenPreloader(screen);
 
@@ -113,6 +166,7 @@ export function OptimizedApp({ screen }: OptimizedAppProps) {
 
   return (
     <div style={{ opacity: isPending ? 0.85 : 1, transition: 'opacity 0.2s ease' }}>
+      {newJoiner && <JoinerPopup joiner={newJoiner} onDismiss={clearNewJoiner} />}
       <ErrorBoundary key={screen} FallbackComponent={ScreenError}>
         <Suspense fallback={<ScreenLoader />}>
           <Component />

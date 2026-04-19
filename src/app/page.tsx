@@ -41,12 +41,14 @@ function PerfMonitor() {
 }
 
 function App() {
-  const { screen, showPayment, goBack, setScreen } = useApp();
+  const { screen, showPayment, newJoiner, clearNewJoiner, goBack, setScreen } = useApp();
 
   return (
     <OptimizedApp
       screen={screen}
       showPayment={showPayment}
+      newJoiner={newJoiner}
+      clearNewJoiner={clearNewJoiner}
       goBack={goBack}
       setScreen={setScreen}
     />

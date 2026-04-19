@@ -7,27 +7,58 @@ interface TableState {
   updatedAt: number;
 }
 
-// Global in-memory store — persists within the same serverless instance.
-// Production upgrade: swap to Vercel KV (`import { kv } from '@vercel/kv'`)
-declare global {
-  // eslint-disable-next-line no-var
-  var __menuvaStore: Map<string, TableState> | undefined;
+const TABLE_KEY_PREFIX = 'menuva:table:';
+const STALE_MS = 4 * 60 * 60 * 1000;
+
+const inMemoryStore: Map<string, TableState> = new Map();
+
+function getInMemoryTable(tableId: string): TableState {
+  return inMemoryStore.get(tableId) ?? { members: [], orderStatus: 'idle', updatedAt: 0 };
 }
-const store: Map<string, TableState> =
-  globalThis.__menuvaStore ??
-  (globalThis.__menuvaStore = new Map<string, TableState>());
 
-const STALE_MS = 4 * 60 * 60 * 1000; // 4 h
+function setInMemoryTable(tableId: string, state: TableState): void {
+  inMemoryStore.set(tableId, state);
+}
 
-function prune() {
-  const now = Date.now();
-  for (const [id, s] of store) {
-    if (now - s.updatedAt > STALE_MS) store.delete(id);
+async function getKvTable(tableId: string): Promise<TableState | null> {
+  try {
+    const { kv } = await import('@vercel/kv');
+    const key = `${TABLE_KEY_PREFIX}${tableId}`;
+    const data = await kv.get<TableState>(key);
+    return data;
+  } catch {
+    return null;
   }
 }
 
-function getOrCreate(tableId: string): TableState {
-  return store.get(tableId) ?? { members: [], orderStatus: 'idle', updatedAt: 0 };
+async function setKvTable(tableId: string, state: TableState): Promise<void> {
+  try {
+    const { kv } = await import('@vercel/kv');
+    const key = `${TABLE_KEY_PREFIX}${tableId}`;
+    await kv.set(key, state, { ex: 86400 });
+  } catch {
+    // Fallback to in-memory
+  }
+}
+
+async function getTable(tableId: string): Promise<TableState> {
+  const kvData = await getKvTable(tableId);
+  if (kvData) return kvData;
+  return getInMemoryTable(tableId);
+}
+
+async function saveTable(tableId: string, state: TableState): Promise<void> {
+  state.updatedAt = Date.now();
+  setInMemoryTable(tableId, state);
+  await setKvTable(tableId, state);
+}
+
+function pruneTable(tableId: string, state: TableState): TableState {
+  const now = Date.now();
+  if (now - state.updatedAt > STALE_MS) {
+    return { members: [], orderStatus: 'idle', updatedAt: now };
+  }
+  return state;
 }
 
 type Params = { tableId: string } | Promise<{ tableId: string }>;
@@ -41,9 +72,9 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Params }
 ) {
-  prune();
   const tableId = await resolveTableId(params);
-  const s = getOrCreate(tableId);
+  let s = await getTable(tableId);
+  s = pruneTable(tableId, s);
   return NextResponse.json({ members: s.members, orderStatus: s.orderStatus });
 }
 
@@ -59,7 +90,8 @@ export async function POST(
     items?: GroupMember['items'];
   };
 
-  const s = getOrCreate(tableId);
+  let s = await getTable(tableId);
+  s = pruneTable(tableId, s);
 
   switch (body.action) {
     case 'join': {
@@ -91,7 +123,6 @@ export async function POST(
     }
   }
 
-  s.updatedAt = Date.now();
-  store.set(tableId, s);
+  await saveTable(tableId, s);
   return NextResponse.json({ ok: true, members: s.members, orderStatus: s.orderStatus });
 }
