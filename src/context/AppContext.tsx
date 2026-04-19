@@ -146,10 +146,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // One-time fetch on mount to populate other users at the table
   useEffect(() => {
+    console.log('[APP] Fetching table data...');
     fetch(`/api/table/${TABLE_ID}`)
       .then(r => r.json())
-      .then((data: { members: GroupMember[] }) => {
-        console.log('[APP] Initial fetch, members:', data.members.map(m => m.name));
+      .then((data: { members: GroupMember[]; debug?: string }) => {
+        console.log('[APP] Got members:', data.members.map(m => m.name), '| debug:', data.debug);
         const others = data.members.filter(m => m.id !== sessionId && m.name);
         if (others.length > 0) {
           setState(s => ({
@@ -162,7 +163,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }));
         }
       })
-      .catch(() => {});
+      .catch((e) => console.log('[APP] Fetch error:', e));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

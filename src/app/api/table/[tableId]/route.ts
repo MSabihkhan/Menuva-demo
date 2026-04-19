@@ -76,7 +76,19 @@ export async function GET(
   const tableId = await resolveTableId(params);
   let s = await getTable(tableId);
   s = pruneTable(tableId, s);
-  return NextResponse.json({ members: s.members, orderStatus: s.orderStatus });
+  
+  // Check if KV is available
+  let kvAvailable = false;
+  try {
+    const { kv } = await import('@vercel/kv');
+    kvAvailable = !!kv;
+  } catch {}
+  
+  return NextResponse.json({ 
+    members: s.members, 
+    orderStatus: s.orderStatus,
+    debug: `KV:${kvAvailable ? 'ON' : 'OFF'}`
+  });
 }
 
 export async function POST(
