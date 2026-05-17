@@ -8,6 +8,7 @@ export interface MenuItem {
   category: string;
   spicy?: boolean;
   gluten?: boolean;
+  modelUrl?: string;
 }
 
 export interface CartItem extends MenuItem {
@@ -38,6 +39,7 @@ export const MENU_ITEMS: MenuItem[] = [
   { id: '3', name: 'Daal Makhani', desc: 'Black lentils simmered overnight in butter and cream', price: 650, tag: "Chef's Pick", emoji: '🥘', category: 'Mains' },
   { id: '4', name: 'Shahi Tukray', desc: 'Saffron-soaked bread, cardamom cream, pistachio', price: 450, tag: null, emoji: '🍮', category: 'Desserts' },
   { id: '5', name: 'Seekh Kebab ×2', desc: 'Double portion of our signature seekh kebab', price: 1900, tag: null, emoji: '🍢', category: 'Grills' },
+  { id: '11', name: 'Mixed Grill Platter', desc: 'Seekh kebab, chicken tikka & boti kabab — charcoal-grilled for the whole table', price: 2200, tag: 'For the Table', emoji: '🍖', category: 'Grills' },
   { id: '6', name: 'Peshwari Chai', desc: 'Cardamom-spiced Kashmiri tea', price: 180, tag: null, emoji: '🍵', category: 'Drinks' },
   { id: '7', name: 'Chicken Tikka', desc: 'Tandoor-roasted chicken in yogurt marinade', price: 850, tag: 'Popular', emoji: '🍗', category: 'Starters' },
   { id: '8', name: 'Vegetable Biryani', desc: 'Fragrant basmati rice with mixed vegetables', price: 550, tag: null, emoji: '🍚', category: 'Mains' },

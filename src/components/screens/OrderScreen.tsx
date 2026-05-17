@@ -41,8 +41,7 @@ function PersonCard({ avatar, name, items, subtotal }: {
 }
 
 export function OrderScreen() {
-  const { groupMembers, getCartTotal, setScreen, goBack, showToast, setOrderStatus, addToCart } = useApp();
-  const [grillAdded, setGrillAdded] = useState(false);
+  const { groupMembers, getCartTotal, setScreen, goBack, showToast, setOrderStatus, addToCart, orderStatus } = useApp();
   const [kitchenNotes, setKitchenNotes] = useState('');
 
   const subtotal = getCartTotal();
@@ -50,6 +49,11 @@ export function OrderScreen() {
   const total = subtotal + tax;
 
   const allMembers = groupMembers.filter(m => m.items.length > 0);
+  const alreadyPlaced = orderStatus === 'placed' || orderStatus === 'waiting';
+
+  // Derive grill upsell state from the actual cart so it stays in sync across devices
+  const grillItem = MENU_ITEMS.find(i => i.name === 'Mixed Grill Platter');
+  const grillAdded = groupMembers.some(m => m.items.some(i => i.id === grillItem?.id));
 
   const handlePlaceOrder = () => {
     if (allMembers.length === 0) {
@@ -131,14 +135,12 @@ export function OrderScreen() {
             </div>
           </div>
           <SmallOutlineButton onClick={() => {
-            if (!grillAdded) {
-              setGrillAdded(true);
-              const item = MENU_ITEMS.find(i => i.name === 'Seekh Kebab Platter');
-              if (item) addToCart(item, 1, []);
-              showToast('Mixed Grill added!', undefined, true);
+            if (!grillAdded && grillItem) {
+              addToCart(grillItem, 1, []);
+              showToast('Mixed Grill Platter added!', undefined, true);
             }
           }}>
-            {grillAdded ? 'Added ✓' : 'Add PKR 2,200'}
+            {grillAdded ? 'Added ✓' : grillItem ? `Add PKR ${grillItem.price.toLocaleString()}` : 'Add'}
           </SmallOutlineButton>
         </div>
 
@@ -166,8 +168,8 @@ export function OrderScreen() {
         padding: '10px 20px 12px',
         background: 'linear-gradient(to bottom, rgba(255,255,255,0) 0%, #fff 35%)',
       }}>
-        <Button onClick={handlePlaceOrder} disabled={allMembers.length === 0}>
-          Place Order
+        <Button onClick={handlePlaceOrder} disabled={allMembers.length === 0 || alreadyPlaced}>
+          {alreadyPlaced ? 'Order Placed ✓' : 'Place Order'}
         </Button>
       </div>
     </ScreenFrame>

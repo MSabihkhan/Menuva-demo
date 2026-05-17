@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { ScreenFrame, Chip, Avatar, Button, SmallOutlineButton, FoodTile, Toast, Input, BackButton } from '../primitives';
 import { MENU_ITEMS } from '@/data/menu';
@@ -11,7 +11,7 @@ function StepperNode({ state, label }: { state: 'done' | 'current' | 'future'; l
     bg = 'var(--success)';
     content = (
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-        <path d="M3 7.2 6 10l5-6" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M3 7.2 6 10l5-6" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
       </svg>
     );
   } else if (state === 'current') {
@@ -126,8 +126,8 @@ function PingButton({ onPing }: { onPing: (msg: string) => void }) {
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
         }}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.4"/>
-            <path d="M8 5v3.5l2 1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+            <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.5"/>
+            <path d="M8 5v3.5l2 1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
           </svg>
           Ping again in {timeLabel}
         </button>
@@ -140,9 +140,13 @@ function PingButton({ onPing }: { onPing: (msg: string) => void }) {
   );
 }
 
+const CHAI_ITEM = MENU_ITEMS.find(i => i.name === 'Peshwari Chai');
+
 export function WaitingScreen() {
   const { groupMembers, toasts, dismissToast, setScreen, showToast, orderStatus, addToCart, goBack } = useApp();
-  const [chaiAdded, setChaiAdded] = useState(false);
+
+  // Derive from actual cart so state persists across navigations and syncs across devices
+  const chaiAdded = groupMembers.some(m => m.items.some(i => i.id === CHAI_ITEM?.id));
 
   const handlePing = useCallback((msg: string) => {
     if (msg.trim()) {
@@ -153,11 +157,9 @@ export function WaitingScreen() {
   }, [showToast]);
 
   const handleAddChai = () => {
-    if (!chaiAdded) {
-      setChaiAdded(true);
-      const chai = MENU_ITEMS.find(i => i.name === 'Peshwari Chai');
-      if (chai) addToCart(chai, 1, []);
-      showToast('Peshwari Chai added!', undefined, true);
+    if (!chaiAdded && CHAI_ITEM) {
+      addToCart(CHAI_ITEM, 1, []);
+      showToast(`${CHAI_ITEM.name} added!`, undefined, true);
     }
   };
 
@@ -167,7 +169,7 @@ export function WaitingScreen() {
     <ScreenFrame>
       {/* Toasts */}
       {toasts.map((t, idx) => (
-        <div key={t.id} style={{ position: 'absolute', top: 52 + idx * 58, left: 16, right: 16, zIndex: 20 }}>
+        <div key={t.id} style={{ position: 'absolute', top: `calc(${52 + idx * 58}px + env(safe-area-inset-top, 0px))`, left: 16, right: 16, zIndex: 20 }}>
           <Toast message={t.message} success={t.success} onDismiss={() => dismissToast(t.id)} />
         </div>
       ))}
@@ -236,7 +238,7 @@ export function WaitingScreen() {
               Add something while you wait?
             </div>
             <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 14, color: 'var(--ink)', marginTop: 2 }}>
-              Peshwari Chai — PKR 180
+              {CHAI_ITEM ? `${CHAI_ITEM.name} — PKR ${CHAI_ITEM.price}` : 'Peshwari Chai'}
             </div>
           </div>
           <SmallOutlineButton onClick={handleAddChai}>

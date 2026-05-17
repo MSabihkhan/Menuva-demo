@@ -4,7 +4,7 @@
   --bg: #FFFFFF;
   --surface: #F7F6F3;
   --surface-2: #EFEDE7;
-  --border: #E8E6E1;
+  --border: #D6D2CB;
   --ink: #1A1918;
   --ink-2: #6B6560;
   --ink-3: #A39E99;
@@ -82,6 +82,32 @@ body {
     max-width: 430px;
     margin: 0 auto;
     box-shadow: 0 0 60px rgba(0,0,0,0.12);
+  }
+}
+
+/* Tablet: render as a centered phone frame so the demo looks intentional */
+@media (min-width: 768px) {
+  body {
+    align-items: center;
+    min-height: 100vh;
+    background: var(--canvas);
+  }
+  #screen-container {
+    max-width: 390px;
+    min-height: 844px;
+    height: 844px;
+    margin: 32px auto;
+    border-radius: 48px;
+    box-shadow: 0 0 0 10px #1A1918, 0 32px 80px rgba(0,0,0,0.45), 0 8px 24px rgba(0,0,0,0.2);
+    overflow: hidden;
+    position: relative;
+  }
+}
+
+@media (min-width: 1024px) {
+  #screen-container {
+    margin: 48px auto;
+    box-shadow: 0 0 0 12px #1A1918, 0 48px 120px rgba(0,0,0,0.5), 0 12px 32px rgba(0,0,0,0.2);
   }
 }
 

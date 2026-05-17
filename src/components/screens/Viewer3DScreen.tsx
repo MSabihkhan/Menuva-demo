@@ -4,20 +4,38 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useApp } from '@/context/AppContext';
 import { ScreenFrame, Button } from '../primitives';
 
+// Side-effect import: registers <model-viewer> custom element
+// Loaded only when needed (this screen is lazy-loaded)
+let modelViewerLoaded = false;
+function loadModelViewer() {
+  if (modelViewerLoaded || typeof window === 'undefined') return;
+  modelViewerLoaded = true;
+  import('@google/model-viewer');
+}
+
 export function Viewer3DScreen() {
   const { selectedItem, setScreen, addToCart, goBack } = useApp();
   const [loading, setLoading] = useState(true);
+  const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const emojiRef = useRef<HTMLDivElement>(null);
   const rotRef = useRef({ x: -8, y: 0, vx: 0, vy: 0.4 });
   const dragRef = useRef({ active: false, lastX: 0, lastY: 0 });
   const rafRef = useRef(0);
 
-  // Simulate model load
+  const hasRealModel = !!selectedItem?.modelUrl;
+
+  // Load model-viewer library and simulate/await model load
   useEffect(() => {
-    const t = setTimeout(() => setLoading(false), 1800);
+    if (hasRealModel) {
+      loadModelViewer();
+      // model-viewer handles its own loading; just show after a short delay
+      const t = setTimeout(() => setLoading(false), 400);
+      return () => clearTimeout(t);
+    }
+    const t = setTimeout(() => setLoading(false), 600);
     return () => clearTimeout(t);
-  }, []);
+  }, [hasRealModel]);
 
   // Auto-rotation + inertia animation loop
   useEffect(() => {
@@ -25,10 +43,8 @@ export function Viewer3DScreen() {
 
     const tick = () => {
       if (!dragRef.current.active) {
-        // Auto rotate
+        // Auto rotate Y only — X is purely user-controlled so drag isn't overwritten
         rotRef.current.y += rotRef.current.vy;
-        // Gentle bob
-        rotRef.current.x = -8 + Math.sin(Date.now() / 2000) * 5;
       } else {
         // Apply inertia
         rotRef.current.vy *= 0.92;
@@ -50,6 +66,7 @@ export function Viewer3DScreen() {
     dragRef.current.active = true;
     dragRef.current.lastX = e.clientX;
     dragRef.current.lastY = e.clientY;
+    setIsDragging(true);
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }, []);
 
@@ -67,6 +84,7 @@ export function Viewer3DScreen() {
 
   const onPointerUp = useCallback(() => {
     dragRef.current.active = false;
+    setIsDragging(false);
   }, []);
 
   const handleAddToOrder = () => {
@@ -101,13 +119,13 @@ export function Viewer3DScreen() {
           position: 'absolute', left: 0, right: 0,
           top: 100, bottom: loading ? 120 : 148,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: loading ? 'default' : 'grab',
+          cursor: loading ? 'default' : isDragging ? 'grabbing' : 'grab',
           touchAction: 'none',
         }}
-        onPointerDown={loading ? undefined : onPointerDown}
-        onPointerMove={loading ? undefined : onPointerMove}
-        onPointerUp={loading ? undefined : onPointerUp}
-        onPointerCancel={loading ? undefined : onPointerUp}
+        onPointerDown={loading || hasRealModel ? undefined : onPointerDown}
+        onPointerMove={loading || hasRealModel ? undefined : onPointerMove}
+        onPointerUp={loading || hasRealModel ? undefined : onPointerUp}
+        onPointerCancel={loading || hasRealModel ? undefined : onPointerUp}
       >
         {loading ? (
           // Loading rings
@@ -136,8 +154,24 @@ export function Viewer3DScreen() {
               whiteSpace: 'nowrap',
             }}>Loading 3D model…</div>
           </div>
+        ) : hasRealModel ? (
+          // Real GLB model via <model-viewer>
+          // @ts-expect-error — declared in src/types/model-viewer.d.ts
+          <model-viewer
+            src={selectedItem.modelUrl}
+            alt={selectedItem.name}
+            auto-rotate
+            camera-controls
+            shadow-intensity="1"
+            exposure="1.1"
+            style={{
+              width: 280, height: 280,
+              background: 'transparent',
+              '--progress-bar-color': 'var(--accent)',
+            } as React.CSSProperties}
+          />
         ) : (
-          // 3D emoji
+          // Emoji viewer for items without a GLB model
           <div style={{
             position: 'relative',
             width: 240, height: 240,
@@ -168,8 +202,8 @@ export function Viewer3DScreen() {
         )}
       </div>
 
-      {/* Drag hint */}
-      {!loading && (
+      {/* Drag hint — only for the emoji viewer */}
+      {!loading && !hasRealModel && (
         <div style={{
           position: 'absolute', left: 0, right: 0,
           top: '62%',

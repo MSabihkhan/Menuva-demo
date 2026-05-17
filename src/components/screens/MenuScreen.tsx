@@ -3,14 +3,14 @@
 import React, { useState, useCallback, memo, useMemo } from 'react';
 import { useApp } from '@/context/AppContext';
 import { ScreenFrame, Chip, AvatarStack, FoodTile, Toast } from '../primitives';
-import { CATEGORIES, MENU_ITEMS, MenuItem } from '@/data/menu';
+import { CATEGORIES, MENU_ITEMS, MenuItem, RESTAURANT } from '@/data/menu';
 import { useHaptic } from '../Feedback';
 
 const MemoFoodTile = memo(FoodTile);
 const MemoChip = memo(Chip);
 
 const MenuHeader = memo(function MenuHeader() {
-  const { groupMembers, getCartCount, setScreen } = useApp();
+  const { groupMembers, getCartCount, setScreen, firebaseConnected } = useApp();
   const badge = getCartCount();
 
   const avatarStack = useMemo(() => (
@@ -24,8 +24,22 @@ const MenuHeader = memo(function MenuHeader() {
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       padding: '0 20px', zIndex: 3,
     }}>
-      <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, color: 'var(--ink)', letterSpacing: '-0.01em' }}>
-        Lahori Darbar
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, color: 'var(--ink)', letterSpacing: '-0.01em' }}>
+          {RESTAURANT.name}
+        </div>
+        {firebaseConnected === false && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            background: 'rgba(185,64,64,0.1)', borderRadius: 100,
+            padding: '2px 8px',
+          }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--error)' }} />
+            <span style={{ fontFamily: 'var(--font-sans)', fontSize: 10, fontWeight: 500, color: 'var(--error)' }}>
+              Offline
+            </span>
+          </div>
+        )}
       </div>
       <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
         {avatarStack}
@@ -35,7 +49,7 @@ const MenuHeader = memo(function MenuHeader() {
         onClick={() => setScreen('order')}
       >
         <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-          <path d="M3 5h2.2l2 10.5h11.3L21 8H6.5" stroke={badge > 0 ? 'var(--ink)' : 'var(--ink-3)'} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+          <path d="M3 5h2.2l2 10.5h11.3L21 8H6.5" stroke={badge > 0 ? 'var(--ink)' : 'var(--ink-3)'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
           <circle cx="8.5" cy="18.5" r="1.4" fill={badge > 0 ? 'var(--ink)' : 'var(--ink-3)'} />
           <circle cx="16.5" cy="18.5" r="1.4" fill={badge > 0 ? 'var(--ink)' : 'var(--ink-3)'} />
         </svg>
@@ -253,7 +267,7 @@ export const MenuScreen = memo(function MenuScreen() {
       {/* Toasts */}
       {toasts.map((t, idx) => (
         <div key={t.id} style={{
-          position: 'absolute', top: 52 + idx * 56, left: 16, right: 16, zIndex: 10,
+          position: 'absolute', top: `calc(${52 + idx * 56}px + env(safe-area-inset-top, 0px))`, left: 16, right: 16, zIndex: 10,
         }}>
           <Toast message={t.message} success={t.success} initials={t.initials} onDismiss={() => dismissToast(t.id)} />
         </div>

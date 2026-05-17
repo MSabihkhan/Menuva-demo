@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(not exist *)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(Remove-Item *)"
+    ]
+  }
+}

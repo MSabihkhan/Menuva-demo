@@ -121,7 +121,7 @@ async function syncOrders() {
 
 // Push notifications for order updates
 self.addEventListener('push', (event) => {
-  const data = event.data?.json()() || {};
+  const data = event.data?.json() || {};
   const options = {
     body: data.body || 'Your order is ready!',
     icon: '/icon-192.png',

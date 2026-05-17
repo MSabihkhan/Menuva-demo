@@ -26,6 +26,9 @@ export function WelcomeScreen() {
   const [error, setError] = useState(false);
   const [touched, setTouched] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
 
   // Only show OTHER users at the table — never show the current user in this list
   const otherMembers = groupMembers.filter(m => !m.isCurrentUser && m.name);
@@ -108,7 +111,7 @@ export function WelcomeScreen() {
               placeholder="e.g. Sara"
               caption={
                 !touched
-                  ? isReturning
+                  ? (mounted && isReturning)
                     ? `Welcome back, ${userName}! Tap to continue.`
                     : 'So everyone knows who ordered what'
                   : undefined
