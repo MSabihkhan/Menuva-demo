@@ -206,11 +206,43 @@ const MenuCard = memo(function MenuCard({ item, quantity = 0, onPlus, onMinus, o
 });
 
 const CartBar = memo(function CartBar() {
-  const { getCartCount, getCartTotal, setScreen } = useApp();
+  const { getCartCount, getCartTotal, setScreen, orderStatus } = useApp();
   const count = getCartCount();
   const total = getCartTotal();
   const haptic = useHaptic();
   const [pressed, setPressed] = useState(false);
+
+  if (orderStatus === 'placed') {
+    return (
+      <div
+        className="glass"
+        style={{
+          position: 'absolute', bottom: 34, left: 0, right: 0, height: 56,
+          borderTop: '1px solid rgba(255,255,255,0.45)',
+          display: 'flex', alignItems: 'center', padding: '0 20px',
+          boxShadow: '0 -4px 24px rgba(0,0,0,0.07)',
+          cursor: 'pointer', background: 'rgba(200,118,10,0.08)',
+          transform: pressed ? 'scale(0.98) translateZ(0)' : 'scale(1) translateZ(0)',
+          transition: 'transform 0.1s ease',
+        }}
+        onClick={() => { haptic(); setScreen('waiting'); }}
+        onMouseDown={() => setPressed(true)}
+        onMouseUp={() => setPressed(false)}
+        onMouseLeave={() => setPressed(false)}
+        onTouchStart={() => setPressed(true)}
+        onTouchEnd={() => setPressed(false)}
+      >
+        <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', marginRight: 10, flexShrink: 0 }} />
+        <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 14, color: 'var(--ink)' }}>
+          Order placed
+        </div>
+        <div style={{ flex: 1, textAlign: 'center', fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--ink-2)' }}>
+          Tap to track status
+        </div>
+        <div style={{ fontFamily: 'var(--font-sans)', fontSize: 20, color: 'var(--accent)' }}>→</div>
+      </div>
+    );
+  }
 
   if (count === 0) return null;
 
