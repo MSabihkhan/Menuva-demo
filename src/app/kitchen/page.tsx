@@ -108,7 +108,7 @@ function KitchenActionButton({ label, onClick, variant }: {
       onMouseUp={() => setPressed(false)}
       onMouseLeave={() => setPressed(false)}
       style={{
-        padding: '10px 22px', borderRadius: 10, border: 'none', cursor: 'pointer',
+        padding: '10px 22px', borderRadius: 10, cursor: 'pointer',
         fontFamily: '"DM Sans", system-ui, sans-serif', fontWeight: 600, fontSize: 14,
         background: variant === 'primary' ? '#C8760A' : '#fff',
         color: variant === 'primary' ? '#fff' : '#1A1918',
