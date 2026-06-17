@@ -2,8 +2,10 @@
 
 import React, { useEffect, useCallback, useState } from 'react';
 import { useApp } from '@/context/AppContext';
-import { ScreenFrame, Chip, Button, SmallOutlineButton, FoodTile, Toast, Input, BackButton } from '../primitives';
-import { MENU_ITEMS, ITEM_BY_ID, Order } from '@/data/menu';
+import { ScreenFrame, Chip, Button, FoodTile, Toast, Input, BackButton } from '../primitives';
+import { ITEM_BY_ID, Order } from '@/data/menu';
+import { WaiterSuggestion } from '../SuggestionCard';
+import { recommend } from '@/data/recommendations';
 
 // ── Stepper (per order) ────────────────────────────────────────────────────────
 
@@ -195,26 +197,22 @@ function PingButton({ onPing }: { onPing: (msg: string) => void }) {
   );
 }
 
-const CHAI_ITEM = MENU_ITEMS.find(i => i.name === 'Peshwari Chai');
-
 // ── Main screen ─────────────────────────────────────────────────────────────────
 
 export function WaitingScreen() {
-  const { orders, toasts, dismissToast, setScreen, showToast, addToCart, goBack, groupMembers } = useApp();
+  const { orders, toasts, dismissToast, setScreen, showToast, goBack } = useApp();
 
-  const chaiAdded = groupMembers.some(m => m.items.some(i => i.id === CHAI_ITEM?.id));
+  // Smart pairing based on everything already ordered.
+  const orderedCtx = orders.flatMap(o => o.lineItems).map(li => {
+    const m = ITEM_BY_ID[li.id];
+    return { id: li.id, category: m?.category || '', spicy: m?.spicy };
+  });
+  const suggestion = recommend(orderedCtx);
 
   const handlePing = useCallback((msg: string) => {
     if (msg.trim()) showToast(`"${msg}" sent to waiter!`, undefined, true);
     else showToast('Waiter has been notified!', undefined, true);
   }, [showToast]);
-
-  const handleAddChai = () => {
-    if (!chaiAdded && CHAI_ITEM) {
-      addToCart(CHAI_ITEM, 1, []);
-      showToast(`${CHAI_ITEM.name} added!`, undefined, true);
-    }
-  };
 
   return (
     <ScreenFrame>
@@ -255,28 +253,15 @@ export function WaitingScreen() {
           orders.map(o => <OrderCard key={o.id} order={o} />)
         )}
 
-        {/* Chai upsell */}
-        <div style={{
-          background: 'rgba(254,243,226,0.9)',
-          backdropFilter: 'blur(20px) saturate(160%)',
-          WebkitBackdropFilter: 'blur(20px) saturate(160%)',
-          border: '1px solid rgba(200,118,10,0.2)',
-          borderRadius: 16, padding: 14,
-          display: 'flex', alignItems: 'center', gap: 12,
-        }}>
-          <FoodTile emoji="🍵" size={44} bg="#FDEACC" />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--ink-2)' }}>
-              Add something while you wait?
+        {/* Smart waiter recommendation — add while you wait */}
+        {suggestion && (
+          <div>
+            <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 12, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+              While you wait
             </div>
-            <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 14, color: 'var(--ink)', marginTop: 2 }}>
-              {CHAI_ITEM ? `${CHAI_ITEM.name} — PKR ${CHAI_ITEM.price}` : 'Peshwari Chai'}
-            </div>
+            <WaiterSuggestion suggestion={suggestion} />
           </div>
-          <SmallOutlineButton onClick={handleAddChai}>
-            {chaiAdded ? 'Added ✓' : 'Add'}
-          </SmallOutlineButton>
-        </div>
+        )}
 
         {/* Ping waiter */}
         <PingButton onPing={handlePing} />

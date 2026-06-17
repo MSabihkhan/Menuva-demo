@@ -3,32 +3,21 @@
 import React, { useEffect, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { ScreenFrame, Chip, Button, BackButton } from '../primitives';
-import { EXTRAS, MENU_ITEMS, MenuItem } from '@/data/menu';
+import { EXTRAS, MenuItem } from '@/data/menu';
+import { recommendMany, Suggestion } from '@/data/recommendations';
+import { WaiterSuggestion } from '../SuggestionCard';
 
-// ── Upsell config ────────────────────────────────────────────────────────────
-
-const UPSELL_MAP: Record<string, { ids: string[]; headline: string; sub: string }> = {
-  Mains:    { ids: ['6', '10', '9'],  headline: 'Complete the meal',  sub: 'Guests who ordered this also added…' },
-  Grills:   { ids: ['10', '9', '6'],  headline: 'Grill essentials',   sub: 'The classic pairings for a grill plate…' },
-  Starters: { ids: ['1', '3', '8'],   headline: 'Make it a full meal', sub: 'Follow your starter with…' },
-  Desserts: { ids: ['6'],             headline: 'End on a high note',  sub: 'The perfect finish…' },
-  Drinks:   { ids: ['7', '2', '9'],   headline: 'Add a bite',          sub: 'Something to eat alongside…' },
-};
-
-function getUpsells(item: MenuItem): MenuItem[] {
-  const config = UPSELL_MAP[item.category] ?? UPSELL_MAP['Drinks'];
-  return MENU_ITEMS.filter(i => config.ids.includes(i.id) && i.id !== item.id).slice(0, 2);
-}
-
-// ── UpsellPopup ───────────────────────────────────────────────────────────────
+// ── UpsellPopup (smart waiter) ────────────────────────────────────────────────
 
 function UpsellPopup({ addedItem, onDismiss }: { addedItem: MenuItem; onDismiss: () => void }) {
-  const { addToCart, showToast } = useApp();
-  const [added, setAdded] = useState<Set<string>>(new Set());
-  const config = UPSELL_MAP[addedItem.category] ?? UPSELL_MAP['Drinks'];
-  const suggestions = getUpsells(addedItem);
+  const { groupMembers } = useApp();
+  // Freeze the picks when the sheet opens so adding one doesn't reshuffle the list.
+  const [suggestions] = useState<Suggestion[]>(() => {
+    const me = groupMembers.find(m => m.isCurrentUser);
+    const cart = (me?.items || []).map(i => ({ id: i.id, category: i.category, spicy: i.spicy }));
+    return recommendMany(cart, 2, [addedItem.id]);
+  });
 
-  // No suggestions → skip popup
   useEffect(() => {
     if (suggestions.length === 0) onDismiss();
   }, [suggestions.length, onDismiss]);
@@ -59,79 +48,31 @@ function UpsellPopup({ addedItem, onDismiss }: { addedItem: MenuItem; onDismiss:
         </div>
 
         {/* Header */}
-        <div style={{ marginBottom: 18 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <span style={{ fontSize: 18 }}>✨</span>
-            <div style={{
-              fontFamily: 'var(--font-display)', fontSize: 20, color: 'var(--ink)', letterSpacing: '-0.01em',
-            }}>
-              {config.headline}
-            </div>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 21, color: 'var(--ink)', letterSpacing: '-0.01em' }}>
+            {addedItem.name} — nice pick
           </div>
-          <div style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--ink-2)', paddingLeft: 26 }}>
-            {config.sub}
+          <div style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--ink-2)', marginTop: 4 }}>
+            Your waiter suggests these to round out the order
           </div>
         </div>
 
-        {/* Suggestion cards */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
-          {suggestions.map(item => {
-            const isAdded = added.has(item.id);
-            return (
-              <div key={item.id} style={{
-                display: 'flex', alignItems: 'center', gap: 14,
-                background: isAdded ? 'var(--success-surface)' : 'var(--surface)',
-                borderRadius: 14, padding: '12px 14px',
-                border: `1px solid ${isAdded ? 'rgba(45,106,79,0.2)' : 'var(--border)'}`,
-                transition: 'background 0.2s ease, border-color 0.2s ease',
-              }}>
-                <div style={{ fontSize: 40, lineHeight: 1, flexShrink: 0 }}>{item.emoji}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{
-                    fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 15, color: 'var(--ink)',
-                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                  }}>{item.name}</div>
-                  <div style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--ink-3)', marginTop: 2 }}>
-                    PKR {item.price.toLocaleString()}
-                  </div>
-                </div>
-                <button
-                  style={{
-                    padding: '8px 16px', borderRadius: 100,
-                    background: isAdded ? 'var(--success)' : 'var(--accent)',
-                    color: '#fff',
-                    fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 13,
-                    border: 'none', cursor: isAdded ? 'default' : 'pointer',
-                    flexShrink: 0,
-                    transition: 'background 0.15s ease',
-                    minWidth: 70, textAlign: 'center',
-                  }}
-                  onClick={() => {
-                    if (!isAdded) {
-                      addToCart(item, 1, []);
-                      setAdded(prev => new Set([...prev, item.id]));
-                      showToast(`${item.name} added!`, undefined, true);
-                    }
-                  }}
-                >
-                  {isAdded ? '✓ Added' : '+ Add'}
-                </button>
-              </div>
-            );
-          })}
+        {/* Smart suggestions */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 18 }}>
+          {suggestions.map(s => <WaiterSuggestion key={s.item.id} suggestion={s} />)}
         </div>
 
         {/* Continue */}
         <button
           style={{
-            width: '100%', height: 52, borderRadius: 100,
+            width: '100%', height: 52, borderRadius: 14,
             background: 'var(--ink)', color: '#fff',
             fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 15,
             border: 'none', cursor: 'pointer',
           }}
           onClick={onDismiss}
         >
-          Continue to menu →
+          Continue to menu
         </button>
       </div>
     </div>

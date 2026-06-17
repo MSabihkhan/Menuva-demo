@@ -2,8 +2,9 @@
 
 import React, { useState } from 'react';
 import { useApp } from '@/context/AppContext';
-import { ScreenFrame, Avatar, Button, Divider, SmallOutlineButton, FoodTile, TableChip, BackButton, Input } from '../primitives';
-import { MENU_ITEMS } from '@/data/menu';
+import { ScreenFrame, Avatar, Button, Divider, FoodTile, TableChip, BackButton, Input } from '../primitives';
+import { WaiterSuggestion } from '../SuggestionCard';
+import { recommend } from '@/data/recommendations';
 
 function PersonCard({ avatar, name, items, subtotal }: {
   avatar: string; name: string;
@@ -47,7 +48,7 @@ function PersonCard({ avatar, name, items, subtotal }: {
 }
 
 export function OrderScreen() {
-  const { groupMembers, getCartTotal, setScreen, goBack, showToast, placeOrder, addToCart, orders } = useApp();
+  const { groupMembers, getCartTotal, setScreen, goBack, showToast, placeOrder, orders } = useApp();
   const [kitchenNotes, setKitchenNotes] = useState('');
   const [placing, setPlacing] = useState(false);
 
@@ -58,9 +59,9 @@ export function OrderScreen() {
   const allMembers = groupMembers.filter(m => m.items.length > 0);
   const hasActiveOrders = orders.length > 0;
 
-  // Derive grill upsell state from the actual cart so it stays in sync across devices
-  const grillItem = MENU_ITEMS.find(i => i.name === 'Mixed Grill Platter');
-  const grillAdded = groupMembers.some(m => m.items.some(i => i.id === grillItem?.id));
+  // Smart waiter pairing, read from the whole table's cart.
+  const cartCtx = groupMembers.flatMap(m => m.items).map(i => ({ id: i.id, category: i.category, spicy: i.spicy }));
+  const suggestion = recommend(cartCtx);
 
   const handlePlaceOrder = async () => {
     if (allMembers.length === 0) {
@@ -134,30 +135,8 @@ export function OrderScreen() {
           />
         </div>
 
-        {/* Upsell */}
-        <div style={{
-          background: 'var(--accent-surface)', borderRadius: 16,
-          border: '1px solid rgba(200,118,10,0.2)', padding: 14,
-          display: 'flex', gap: 12, alignItems: 'center',
-        }}>
-          <FoodTile emoji="🍖" image={grillItem?.image} alt="Mixed Grill Platter" size={48} radius={12} bg="#FDEACC" />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontFamily: 'var(--font-sans)', fontStyle: 'italic', fontSize: 13, color: 'var(--ink-2)' }}>
-              Since you're all together—
-            </div>
-            <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 14, color: 'var(--ink)', marginTop: 2 }}>
-              Mixed Grill Platter
-            </div>
-          </div>
-          <SmallOutlineButton onClick={() => {
-            if (!grillAdded && grillItem) {
-              addToCart(grillItem, 1, []);
-              showToast('Mixed Grill Platter added!', undefined, true);
-            }
-          }}>
-            {grillAdded ? 'Added ✓' : grillItem ? `Add PKR ${grillItem.price.toLocaleString()}` : 'Add'}
-          </SmallOutlineButton>
-        </div>
+        {/* Smart waiter recommendation */}
+        {suggestion && <WaiterSuggestion suggestion={suggestion} />}
 
         {/* Totals */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
