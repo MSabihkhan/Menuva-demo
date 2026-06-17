@@ -2,26 +2,40 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { db } from '@/lib/firebase';
-import { ref, onValue, set } from 'firebase/database';
-import type { GroupMember, CartItem } from '@/data/menu';
+import { ref, onValue } from 'firebase/database';
+import { api } from '@/lib/api';
+import { FoodTile } from '@/components/primitives';
+import { ITEM_BY_ID } from '@/data/menu';
+import type { Order, OrderLineItem, OrderStatus } from '@/data/menu';
 
-interface FirebaseMember {
-  id: string;
-  name: string;
-  initials: string;
-  itemsJson: string;
-  joinedAt: number;
+const TABLE_ID = 'T7';
+
+function toArray<T>(val: unknown): T[] {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.filter(Boolean) as T[];
+  return Object.values(val as Record<string, T>);
 }
 
-function parseItems(json: string): CartItem[] {
-  try { return JSON.parse(json || '[]'); } catch { return []; }
+function parseOrders(val: unknown): Order[] {
+  if (!val) return [];
+  return Object.entries(val as Record<string, Record<string, unknown>>)
+    .map(([id, raw]) => ({
+      id,
+      round: Number(raw.round) || 1,
+      placedAt: Number(raw.placedAt) || 0,
+      etaMinutes: Number(raw.etaMinutes) || 18,
+      status: (raw.status as OrderStatus) || 'placed',
+      lineItems: toArray<OrderLineItem>(raw.lineItems),
+      paid: !!raw.paid,
+    }))
+    .sort((a, b) => a.placedAt - b.placedAt);
 }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; border: string }> = {
-  idle:       { label: 'Waiting for order',   color: '#A39E99', bg: '#F0EEE9', border: '#A39E9933' },
-  placed:     { label: 'New order received!', color: '#C8760A', bg: '#FEF3E2', border: '#C8760A55' },
-  preparing:  { label: 'Preparing…',          color: '#2D6A4F', bg: '#EAF3DE', border: '#2D6A4F33' },
-  ready:      { label: 'Ready to serve! 🎉',  color: '#2D6A4F', bg: '#EAF3DE', border: '#2D6A4F33' },
+const STATUS_CONFIG: Record<OrderStatus, { label: string; color: string; bg: string; border: string; next?: { label: string; to: OrderStatus } }> = {
+  placed:    { label: 'New order',  color: '#C8760A', bg: '#FEF3E2', border: '#C8760A55', next: { label: 'Start Preparing', to: 'preparing' } },
+  preparing: { label: 'Preparing',  color: '#2D6A4F', bg: '#EAF3DE', border: '#2D6A4F33', next: { label: 'Mark as Ready', to: 'ready' } },
+  ready:     { label: 'Ready 🎉',   color: '#2D6A4F', bg: '#EAF3DE', border: '#2D6A4F33', next: { label: 'Complete (Served)', to: 'served' } },
+  served:    { label: 'Served',     color: '#A39E99', bg: '#F0EEE9', border: '#A39E9933' },
 };
 
 function playBeep() {
@@ -54,52 +68,7 @@ function ConnDot({ connected }: { connected: boolean | null }) {
   );
 }
 
-function GuestCard({ member }: { member: GroupMember }) {
-  const subtotal = member.items.reduce((s, i) => s + i.price * i.quantity, 0);
-  return (
-    <div style={{ background: '#fff', borderRadius: 16, padding: 20, border: '1px solid #D6D2CB' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
-        <div style={{
-          width: 36, height: 36, borderRadius: '50%',
-          background: '#C8760A', color: '#fff',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontWeight: 600, fontSize: 13, flexShrink: 0,
-        }}>{member.initials}</div>
-        <div style={{ fontWeight: 600, fontSize: 15, color: '#1A1918' }}>{member.name}</div>
-        <div style={{ marginLeft: 'auto', fontSize: 12, color: '#6B6560' }}>
-          {member.items.length} item{member.items.length !== 1 ? 's' : ''}
-        </div>
-      </div>
-
-      {member.items.length === 0 ? (
-        <div style={{ fontSize: 13, color: '#A39E99', padding: '4px 0' }}>No items yet</div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-          {member.items.map((item, i) => (
-            <div key={i} style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              fontSize: 14, color: '#1A1918',
-              padding: '7px 0', borderBottom: '1px solid #F0EEE9',
-            }}>
-              <span>{item.quantity > 1 ? `${item.name} ×${item.quantity}` : item.name}</span>
-              <span style={{ color: '#6B6560', fontSize: 13 }}>PKR {(item.price * item.quantity).toLocaleString()}</span>
-            </div>
-          ))}
-          <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#1A1918' }}>Subtotal</span>
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#C8760A' }}>PKR {subtotal.toLocaleString()}</span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function KitchenActionButton({ label, onClick, variant }: {
-  label: string;
-  onClick: () => void;
-  variant: 'primary' | 'secondary';
-}) {
+function ActionButton({ label, onClick, variant }: { label: string; onClick: () => void; variant: 'primary' | 'secondary' }) {
   const [pressed, setPressed] = useState(false);
   return (
     <button
@@ -123,58 +92,101 @@ function KitchenActionButton({ label, onClick, variant }: {
   );
 }
 
+function OrderTicket({ order, onAdvance }: { order: Order; onAdvance: (to: OrderStatus) => void }) {
+  const cfg = STATUS_CONFIG[order.status] ?? STATUS_CONFIG.placed;
+  const subtotal = order.lineItems.reduce((s, li) => s + li.price * li.quantity, 0);
+  const tax = Math.round(subtotal * 0.16);
+  const placedTime = order.placedAt ? new Date(order.placedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+
+  // Group items by person for the ticket.
+  const byPerson = new Map<string, { name: string; items: OrderLineItem[] }>();
+  for (const li of order.lineItems) {
+    const g = byPerson.get(li.bySid) ?? { name: li.byName, items: [] };
+    g.items.push(li);
+    byPerson.set(li.bySid, g);
+  }
+
+  return (
+    <div style={{ background: '#fff', borderRadius: 16, border: `1.5px solid ${cfg.border}`, overflow: 'hidden' }}>
+      <div style={{ background: cfg.bg, padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 10, height: 10, borderRadius: '50%', background: cfg.color }} />
+          <div style={{ fontWeight: 700, fontSize: 16, color: '#1A1918' }}>Order {order.round}</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: cfg.color }}>· {cfg.label}</div>
+        </div>
+        {placedTime && <div style={{ fontSize: 12, color: '#6B6560' }}>{placedTime}</div>}
+      </div>
+
+      <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {[...byPerson.values()].map((g, gi) => (
+          <div key={gi}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#6B6560', marginBottom: 4 }}>{g.name}</div>
+            {g.items.map((li, i) => {
+              const meta = ITEM_BY_ID[li.id];
+              return (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 0' }}>
+                  <FoodTile emoji={meta?.emoji || '🍽️'} image={meta?.image} alt={li.name} size={36} radius={9} />
+                  <span style={{ flex: 1, fontSize: 14, color: '#1A1918' }}>{li.quantity > 1 ? `${li.name} ×${li.quantity}` : li.name}</span>
+                  <span style={{ color: '#6B6560', fontSize: 13 }}>PKR {(li.price * li.quantity).toLocaleString()}</span>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #F0EEE9', paddingTop: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#1A1918' }}>Total (incl. tax)</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#C8760A' }}>PKR {(subtotal + tax).toLocaleString()}</span>
+        </div>
+
+        {cfg.next && (
+          <div style={{ marginTop: 4 }}>
+            <ActionButton label={cfg.next.label} onClick={() => onAdvance(cfg.next!.to)} variant="primary" />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function KitchenPage() {
-  const [members, setMembers] = useState<GroupMember[]>([]);
-  const [orderStatus, setOrderStatus] = useState('idle');
+  const [orders, setOrders] = useState<Order[]>([]);
   const [connected, setConnected] = useState<boolean | null>(null);
   const [lastUpdated, setLastUpdated] = useState('');
   const [alerting, setAlerting] = useState(false);
-  const prevStatusRef = useRef('idle');
+  const seenIdsRef = useRef<Set<string> | null>(null);
 
   useEffect(() => {
-    const unsubConn = onValue(ref(db, '.info/connected'), snap => {
-      setConnected(snap.val() === true);
-    });
+    const unsubConn = onValue(ref(db, '.info/connected'), snap => setConnected(snap.val() === true));
 
-    const unsubMembers = onValue(ref(db, 'tables/T7/members'), snap => {
-      const data = snap.val() as Record<string, FirebaseMember> | null;
-      setMembers(
-        data
-          ? Object.values(data)
-              .filter(m => m.name)
-              .sort((a, b) => a.joinedAt - b.joinedAt)
-              .map(m => ({
-                id: m.id, name: m.name, initials: m.initials,
-                items: parseItems(m.itemsJson), isCurrentUser: false,
-              }))
-          : []
-      );
-      setLastUpdated(new Date().toLocaleTimeString());
-    });
-
-    const unsubStatus = onValue(ref(db, 'tables/T7/orderStatus'), snap => {
-      const status = snap.val() || 'idle';
-      setOrderStatus(status);
+    const unsubOrders = onValue(ref(db, `tables/${TABLE_ID}/orders`), snap => {
+      const next = parseOrders(snap.val());
+      setOrders(next);
       setLastUpdated(new Date().toLocaleTimeString());
 
-      if (status === 'placed' && prevStatusRef.current !== 'placed') {
-        playBeep();
-        setAlerting(true);
-        setTimeout(() => setAlerting(false), 3000);
+      // Beep when a genuinely new order appears (skip the first snapshot).
+      const ids = new Set(next.map(o => o.id));
+      if (seenIdsRef.current) {
+        const isNew = next.some(o => !seenIdsRef.current!.has(o.id) && o.status === 'placed');
+        if (isNew) {
+          playBeep();
+          setAlerting(true);
+          setTimeout(() => setAlerting(false), 3000);
+        }
       }
-      prevStatusRef.current = status;
+      seenIdsRef.current = ids;
     });
 
-    return () => { unsubConn(); unsubMembers(); unsubStatus(); };
+    return () => { unsubConn(); unsubOrders(); };
   }, []);
 
-  const updateStatus = (status: string) => {
-    set(ref(db, 'tables/T7/orderStatus'), status).catch(() => {});
+  const advance = (order: Order, to: OrderStatus) => {
+    api.advanceStatus(TABLE_ID, order.id, to).catch(() => {});
   };
 
-  const cfg = STATUS_CONFIG[orderStatus] ?? STATUS_CONFIG.idle;
-  const totalItems = members.reduce((t, m) => t + m.items.reduce((s, i) => s + i.quantity, 0), 0);
-  const totalAmount = members.reduce((t, m) => t + m.items.reduce((s, i) => s + i.price * i.quantity, 0), 0);
+  const active = orders.filter(o => o.status !== 'served');
+  const totalItems = active.reduce((t, o) => t + o.lineItems.reduce((s, li) => s + li.quantity, 0), 0);
+  const totalAmount = active.reduce((t, o) => t + o.lineItems.reduce((s, li) => s + li.price * li.quantity, 0), 0);
   const tax = Math.round(totalAmount * 0.16);
 
   return (
@@ -205,76 +217,42 @@ export default function KitchenPage() {
       </div>
 
       <div style={{ padding: '28px 32px', maxWidth: 1024, margin: '0 auto' }}>
-        {/* Status + totals banner */}
+        {/* Totals banner */}
         <div
           className={alerting ? 'alert-pulse' : ''}
           style={{
-            background: cfg.bg, borderRadius: 16, padding: '18px 22px',
-            border: `1.5px solid ${cfg.border}`,
+            background: active.length > 0 ? '#FEF3E2' : '#fff', borderRadius: 16, padding: '18px 22px',
+            border: `1.5px solid ${active.length > 0 ? '#C8760A55' : '#D6D2CB'}`,
             marginBottom: 16, transition: 'background 0.4s ease, border-color 0.4s ease',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{
-                width: 12, height: 12, borderRadius: '50%', background: cfg.color, flexShrink: 0,
-                ...(alerting ? { animation: 'pulse-border 0.5s ease infinite' } : {}),
-              }} />
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 17, color: '#1A1918' }}>{cfg.label}</div>
-                {lastUpdated && (
-                  <div style={{ fontSize: 12, color: '#6B6560', marginTop: 2 }}>Updated {lastUpdated}</div>
-                )}
-              </div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 17, color: '#1A1918' }}>
+              {active.length === 0 ? 'Waiting for orders' : `${active.length} active order${active.length !== 1 ? 's' : ''}`}
             </div>
-            <div style={{ display: 'flex', gap: 24 }}>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 12, color: '#6B6560', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Items</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: '#1A1918' }}>{totalItems}</div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 12, color: '#6B6560', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Subtotal</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: '#C8760A' }}>PKR {totalAmount.toLocaleString()}</div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 12, color: '#6B6560', textTransform: 'uppercase', letterSpacing: '0.06em' }}>With Tax</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: '#1A1918' }}>PKR {(totalAmount + tax).toLocaleString()}</div>
-              </div>
+            {lastUpdated && <div style={{ fontSize: 12, color: '#6B6560', marginTop: 2 }}>Updated {lastUpdated}</div>}
+          </div>
+          <div style={{ display: 'flex', gap: 24 }}>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 12, color: '#6B6560', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Items</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: '#1A1918' }}>{totalItems}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 12, color: '#6B6560', textTransform: 'uppercase', letterSpacing: '0.06em' }}>With Tax</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: '#C8760A' }}>PKR {(totalAmount + tax).toLocaleString()}</div>
             </div>
           </div>
-
-          {/* Action buttons */}
-          {(orderStatus === 'placed' || orderStatus === 'preparing' || orderStatus === 'ready') && (
-            <div style={{ marginTop: 16, display: 'flex', gap: 10, flexWrap: 'wrap', borderTop: `1px solid ${cfg.border}`, paddingTop: 16 }}>
-              {orderStatus === 'placed' && (
-                <KitchenActionButton label="Start Preparing" onClick={() => updateStatus('preparing')} variant="primary" />
-              )}
-              {orderStatus === 'preparing' && (
-                <KitchenActionButton label="Mark as Ready" onClick={() => updateStatus('ready')} variant="primary" />
-              )}
-              {orderStatus === 'ready' && (
-                <KitchenActionButton label="Complete Order" onClick={() => updateStatus('idle')} variant="primary" />
-              )}
-              <KitchenActionButton label="Reset" onClick={() => updateStatus('idle')} variant="secondary" />
-            </div>
-          )}
         </div>
 
-        {/* Guest cards */}
-        {members.length === 0 ? (
-          <div style={{
-            background: '#fff', borderRadius: 16, padding: 56,
-            textAlign: 'center', color: '#A39E99', fontSize: 15,
-          }}>
-            No guests at the table yet. Waiting for orders…
+        {/* Tickets */}
+        {orders.length === 0 ? (
+          <div style={{ background: '#fff', borderRadius: 16, padding: 56, textAlign: 'center', color: '#A39E99', fontSize: 15 }}>
+            No orders yet. Waiting for the table…
           </div>
         ) : (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-            gap: 16,
-          }}>
-            {members.map(m => <GuestCard key={m.id} member={m} />)}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
+            {orders.map(o => <OrderTicket key={o.id} order={o} onAdvance={(to) => advance(o, to)} />)}
           </div>
         )}
       </div>

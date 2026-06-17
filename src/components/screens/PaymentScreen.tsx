@@ -1,12 +1,16 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '@/context/AppContext';
-import { ScreenFrame, BackButton, Divider } from '../primitives';
-import type { GroupMember } from '@/data/menu';
+import { ScreenFrame, BackButton, Divider, FoodTile } from '../primitives';
+import { api } from '@/lib/api';
+import { ITEM_BY_ID } from '@/data/menu';
 
 type PayScope = 'mine' | 'all';
 type PayMethod = 'jazz' | 'easy' | 'card';
+
+interface BillItem { name: string; price: number; quantity: number; emoji?: string; image?: string }
+interface BillGroup { sid: string; name: string; initials: string; items: BillItem[]; isMe: boolean }
 
 // ── Small components ─────────────────────────────────────────────────────────
 
@@ -58,8 +62,9 @@ function PayOption({ label, logo, color, selected, onClick }: {
   );
 }
 
-function MemberBillCard({ member, highlight }: { member: GroupMember; highlight?: boolean }) {
-  const subtotal = member.items.reduce((s, i) => s + i.price * i.quantity, 0);
+function BillCard({ group }: { group: BillGroup }) {
+  const subtotal = group.items.reduce((s, i) => s + i.price * i.quantity, 0);
+  const highlight = group.isMe;
   return (
     <div style={{
       background: highlight ? 'var(--accent-surface)' : 'var(--surface)',
@@ -73,26 +78,27 @@ function MemberBillCard({ member, highlight }: { member: GroupMember; highlight?
           background: highlight ? 'var(--accent)' : 'var(--border)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 12,
-          color: highlight ? '#fff' : 'var(--ink-2)',
-          flexShrink: 0,
+          color: highlight ? '#fff' : 'var(--ink-2)', flexShrink: 0,
         }}>
-          {member.initials}
+          {group.initials}
         </div>
         <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 14, color: 'var(--ink)', flex: 1 }}>
-          {member.name}{highlight ? ' (you)' : ''}
+          {group.name}{highlight ? ' (you)' : ''}
         </div>
         <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 14, color: 'var(--accent)' }}>
           PKR {subtotal.toLocaleString()}
         </div>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {member.items.map((item, i) => (
-          <div key={i} style={{
-            display: 'flex', justifyContent: 'space-between',
-            fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--ink-2)',
-          }}>
-            <span>{item.quantity > 1 ? `${item.name} ×${item.quantity}` : item.name}</span>
-            <span>PKR {(item.price * item.quantity).toLocaleString()}</span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {group.items.map((item, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <FoodTile emoji={item.emoji || '🍽️'} image={item.image} alt={item.name} size={36} radius={9} />
+            <div style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-sans)', fontSize: 13.5, color: 'var(--ink)' }}>
+              {item.name}{item.quantity > 1 ? <span style={{ color: 'var(--ink-3)' }}> ×{item.quantity}</span> : null}
+            </div>
+            <div style={{ fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 600, color: 'var(--ink-2)' }}>
+              PKR {(item.price * item.quantity).toLocaleString()}
+            </div>
           </div>
         ))}
       </div>
@@ -100,15 +106,11 @@ function MemberBillCard({ member, highlight }: { member: GroupMember; highlight?
   );
 }
 
-const PAY_METHOD_LABELS: Record<string, string> = {
-  jazz: 'JazzCash',
-  easy: 'EasyPaisa',
-  card: 'Card',
-};
+const PAY_METHOD_LABELS: Record<string, string> = { jazz: 'JazzCash', easy: 'EasyPaisa', card: 'Card' };
 
 function SuccessState({ amount, coveredAll, guestCount, payMethod, items, onDone, onSendReceipt }: {
   amount: number; coveredAll: boolean; guestCount: number; payMethod: string;
-  items: { name: string; price: number; quantity: number }[];
+  items: BillItem[];
   onDone: () => void;
   onSendReceipt: () => void;
 }) {
@@ -118,20 +120,17 @@ function SuccessState({ amount, coveredAll, guestCount, payMethod, items, onDone
       flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column',
       alignItems: 'center', padding: '28px 24px 16px', gap: 20,
     }}>
-      {/* Check icon */}
       <div style={{
         width: 72, height: 72, borderRadius: '50%',
         background: 'var(--success-surface)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        animation: 'successPop 0.4s cubic-bezier(0.34,1.56,0.64,1)',
-        flexShrink: 0,
+        animation: 'successPop 0.4s cubic-bezier(0.34,1.56,0.64,1)', flexShrink: 0,
       }}>
         <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
           <path d="M7 17 13 23 25 11" stroke="var(--success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </div>
 
-      {/* Title + meta */}
       <div style={{ textAlign: 'center' }}>
         <div style={{ fontFamily: 'var(--font-display)', fontSize: 24, color: 'var(--ink)', letterSpacing: '-0.01em' }}>
           Payment received!
@@ -140,16 +139,12 @@ function SuccessState({ amount, coveredAll, guestCount, payMethod, items, onDone
           Order #{orderNumber} · via {PAY_METHOD_LABELS[payMethod] ?? payMethod}
         </div>
         {coveredAll && guestCount > 0 && (
-          <div style={{
-            marginTop: 8,
-            fontFamily: 'var(--font-sans)', fontSize: 14, color: 'var(--success)', fontWeight: 500,
-          }}>
+          <div style={{ marginTop: 8, fontFamily: 'var(--font-sans)', fontSize: 14, color: 'var(--success)', fontWeight: 500 }}>
             You picked up the tab for {guestCount} other{guestCount !== 1 ? 's' : ''} — very generous! 🎉
           </div>
         )}
       </div>
 
-      {/* Receipt breakdown */}
       {items.length > 0 && (
         <div style={{ width: '100%', background: 'var(--surface)', borderRadius: 14, padding: '14px 16px' }}>
           <div style={{
@@ -169,9 +164,7 @@ function SuccessState({ amount, coveredAll, guestCount, payMethod, items, onDone
           </div>
           <div style={{ borderTop: '1px solid var(--border)', marginTop: 10, paddingTop: 10 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 14, color: 'var(--ink)' }}>
-                Total paid
-              </span>
+              <span style={{ fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 14, color: 'var(--ink)' }}>Total paid</span>
               <span style={{ fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 15, color: 'var(--accent)' }}>
                 PKR {amount.toLocaleString()}
               </span>
@@ -180,14 +173,11 @@ function SuccessState({ amount, coveredAll, guestCount, payMethod, items, onDone
         </div>
       )}
 
-      {/* Actions */}
       <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
         <button
           style={{
-            width: '100%', height: 52, borderRadius: 100,
-            background: 'var(--ink)', color: '#fff',
-            fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 15,
-            border: 'none', cursor: 'pointer',
+            width: '100%', height: 52, borderRadius: 100, background: 'var(--ink)', color: '#fff',
+            fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 15, border: 'none', cursor: 'pointer',
           }}
           onClick={onDone}
         >
@@ -195,8 +185,7 @@ function SuccessState({ amount, coveredAll, guestCount, payMethod, items, onDone
         </button>
         <button
           style={{
-            width: '100%', height: 44, borderRadius: 100,
-            background: 'transparent', color: 'var(--ink-2)',
+            width: '100%', height: 44, borderRadius: 100, background: 'transparent', color: 'var(--ink-2)',
             fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 14,
             border: '1.5px solid var(--border)', cursor: 'pointer',
           }}
@@ -216,45 +205,60 @@ function SuccessState({ amount, coveredAll, guestCount, payMethod, items, onDone
 // ── Main screen ───────────────────────────────────────────────────────────────
 
 export function PaymentScreen() {
-  const { goBack, groupMembers, showToast, resetOrder } = useApp();
+  const { goBack, orders, sessionId, tableId, showToast, resetOrder } = useApp();
   const [payScope, setPayScope] = useState<PayScope>('mine');
   const [selectedPay, setSelectedPay] = useState<PayMethod>('jazz');
   const [paid, setPaid] = useState(false);
   const [paying, setPaying] = useState(false);
   const [paidWithMethod, setPaidWithMethod] = useState<PayMethod>('jazz');
-  const [paidItems, setPaidItems] = useState<{ name: string; price: number; quantity: number }[]>([]);
+  const [paidItems, setPaidItems] = useState<BillItem[]>([]);
 
-  const currentUser = groupMembers.find(m => m.isCurrentUser);
-  const allWithItems = groupMembers.filter(m => m.items.length > 0);
-  const others = groupMembers.filter(m => !m.isCurrentUser && m.items.length > 0);
+  // Build the bill from the orders timeline, grouped by person.
+  const groups = useMemo<BillGroup[]>(() => {
+    const byPerson = new Map<string, BillGroup>();
+    for (const o of orders) {
+      for (const li of o.lineItems) {
+        const g = byPerson.get(li.bySid) ?? {
+          sid: li.bySid, name: li.byName,
+          initials: (li.byName || '??').slice(0, 2).toUpperCase(),
+          items: [], isMe: li.bySid === sessionId,
+        };
+        g.items.push({ name: li.name, price: li.price, quantity: li.quantity, emoji: ITEM_BY_ID[li.id]?.emoji, image: ITEM_BY_ID[li.id]?.image });
+        byPerson.set(li.bySid, g);
+      }
+    }
+    return [...byPerson.values()];
+  }, [orders, sessionId]);
 
-  // Redirect back if there's nothing to pay for
+  const myGroup = groups.find(g => g.isMe) ?? null;
+  const others = groups.filter(g => !g.isMe);
+  const hasGroup = others.length > 0;
+
+  // Redirect back if there's nothing to pay for.
   useEffect(() => {
-    if (allWithItems.length === 0) goBack();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (orders.length === 0) goBack();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const mySubtotal = currentUser?.items.reduce((s, i) => s + i.price * i.quantity, 0) ?? 0;
-  const tableSubtotal = allWithItems.reduce(
-    (sum, m) => sum + m.items.reduce((s, i) => s + i.price * i.quantity, 0), 0
-  );
+  const sum = (items: BillItem[]) => items.reduce((s, i) => s + i.price * i.quantity, 0);
+  const mySubtotal = myGroup ? sum(myGroup.items) : 0;
+  const tableSubtotal = groups.reduce((s, g) => s + sum(g.items), 0);
 
   const paySubtotal = payScope === 'mine' ? mySubtotal : tableSubtotal;
   const payAmount = Math.round(paySubtotal * 1.16);
-  const hasGroup = others.length > 0;
 
   const handlePay = async () => {
-    if (payAmount === 0) {
-      showToast('No items to pay for!');
-      return;
-    }
+    if (payAmount === 0) { showToast('No items to pay for!'); return; }
     setPaying(true);
-    await new Promise(r => setTimeout(r, 1200));
+    try {
+      await Promise.all(orders.filter(o => !o.paid).map(o => api.payOrder(tableId, o.id, selectedPay)));
+    } catch {
+      // Demo payment — don't block the success screen on a network hiccup.
+    }
     setPaying(false);
     setPaidWithMethod(selectedPay);
-    // Capture items at time of payment for the receipt
-    const receiptMembers = payScope === 'all' ? allWithItems : (currentUser ? [currentUser] : []);
-    setPaidItems(receiptMembers.flatMap(m => m.items.map(i => ({ name: i.name, price: i.price, quantity: i.quantity }))));
+    const payingGroups = payScope === 'all' ? groups : (myGroup ? [myGroup] : []);
+    setPaidItems(payingGroups.flatMap(g => g.items));
     setPaid(true);
     showToast('Payment successful!', undefined, true);
   };
@@ -262,29 +266,21 @@ export function PaymentScreen() {
   const handleDone = async () => { await resetOrder(); };
   const handleSendReceipt = () => showToast('Receipt sent to your number!', undefined, true);
 
-  if (!currentUser) return null;
-
   return (
     <ScreenFrame>
       <BackButton onClick={goBack} />
 
       <div style={{
-        position: 'absolute', left: 0, right: 0, bottom: 0,
-        height: '92%',
-        background: '#fff',
-        borderTopLeftRadius: 24, borderTopRightRadius: 24,
-        overflow: 'hidden',
-        display: 'flex', flexDirection: 'column',
+        position: 'absolute', left: 0, right: 0, bottom: 0, height: '92%',
+        background: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+        overflow: 'hidden', display: 'flex', flexDirection: 'column',
         boxShadow: '0 -12px 40px rgba(0,0,0,0.12)',
         animation: 'slideUpSheet 0.35s cubic-bezier(0.32,0.72,0,1)',
       }}>
         <SheetHandle />
 
         {/* Header */}
-        <div style={{
-          padding: '4px 20px 16px',
-          borderBottom: '1px solid var(--border)',
-        }}>
+        <div style={{ padding: '4px 20px 16px', borderBottom: '1px solid var(--border)' }}>
           <div style={{
             fontFamily: 'var(--font-display)', fontSize: 22, color: 'var(--ink)',
             letterSpacing: '-0.01em', marginBottom: 12,
@@ -292,12 +288,8 @@ export function PaymentScreen() {
             Time to settle up
           </div>
 
-          {/* Pay scope toggle — only show if others have items */}
           {hasGroup && (
-            <div style={{
-              display: 'flex', gap: 8,
-              background: 'var(--surface)', borderRadius: 100, padding: 4,
-            }}>
+            <div style={{ display: 'flex', gap: 8, background: 'var(--surface)', borderRadius: 100, padding: 4 }}>
               {(['mine', 'all'] as PayScope[]).map(scope => (
                 <button
                   key={scope}
@@ -321,9 +313,7 @@ export function PaymentScreen() {
           )}
 
           {!hasGroup && (
-            <div style={{
-              fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 22, color: 'var(--accent)',
-            }}>
+            <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 22, color: 'var(--accent)' }}>
               PKR {payAmount.toLocaleString()}
             </div>
           )}
@@ -340,20 +330,15 @@ export function PaymentScreen() {
             onSendReceipt={handleSendReceipt}
           />
         ) : (
-          <div style={{
-            flex: 1, overflowY: 'auto', padding: '16px 20px',
-            display: 'flex', flexDirection: 'column', gap: 12,
-          }}>
-            {/* Bill breakdown */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* Breakdown */}
             {payScope === 'all' && hasGroup ? (
               <>
                 <div style={{
                   fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 12,
                   color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.08em',
                 }}>Full table breakdown</div>
-                {allWithItems.map(m => (
-                  <MemberBillCard key={m.id} member={m} highlight={m.isCurrentUser} />
-                ))}
+                {groups.map(g => <BillCard key={g.sid} group={g} />)}
               </>
             ) : (
               <>
@@ -361,24 +346,22 @@ export function PaymentScreen() {
                   fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 12,
                   color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.08em',
                 }}>Your items</div>
-                {currentUser.items.length === 0 ? (
+                {!myGroup || myGroup.items.length === 0 ? (
                   <div style={{
                     background: 'var(--surface)', borderRadius: 14, padding: 20,
                     textAlign: 'center', fontFamily: 'var(--font-sans)', fontSize: 14, color: 'var(--ink-3)',
                   }}>
-                    You haven't added any items yet.
+                    You haven&apos;t ordered any items yet.
                   </div>
                 ) : (
-                  <MemberBillCard member={currentUser} highlight />
+                  <BillCard group={myGroup} />
                 )}
               </>
             )}
 
-            {/* Tax line */}
+            {/* Tax */}
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 2px' }}>
-              <span style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--ink-3)' }}>
-                Tax (16%)
-              </span>
+              <span style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--ink-3)' }}>Tax (16%)</span>
               <span style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--ink-3)' }}>
                 PKR {(payAmount - paySubtotal).toLocaleString()}
               </span>
@@ -395,14 +378,13 @@ export function PaymentScreen() {
               </span>
             </div>
 
-            {/* Full-table notice */}
             {payScope === 'all' && hasGroup && (
               <div style={{
                 background: 'var(--accent-surface)', borderRadius: 12, padding: '10px 14px',
                 fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--accent)',
                 border: '1px solid rgba(200,118,10,0.2)',
               }}>
-                You're picking up the tab for {others.length} other{others.length !== 1 ? 's' : ''} — that's very generous!
+                You&apos;re picking up the tab for {others.length} other{others.length !== 1 ? 's' : ''} — that&apos;s very generous!
               </div>
             )}
 
@@ -416,16 +398,13 @@ export function PaymentScreen() {
             <PayOption label="EasyPaisa" logo="EP" color="#00A651" selected={selectedPay === 'easy'} onClick={() => setSelectedPay('easy')} />
             <PayOption label="Credit or Debit Card" logo="CARD" selected={selectedPay === 'card'} onClick={() => setSelectedPay('card')} />
 
-            {/* Pay CTA */}
             <div style={{ marginTop: 4, paddingBottom: 8 }}>
               <button
                 style={{
                   width: '100%', height: 52, borderRadius: 100,
-                  background: paying ? 'var(--ink-3)' : 'var(--accent)',
-                  color: '#fff',
+                  background: paying ? 'var(--ink-3)' : 'var(--accent)', color: '#fff',
                   fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 16,
-                  border: 'none', cursor: paying ? 'default' : 'pointer',
-                  transition: 'background 0.2s ease',
+                  border: 'none', cursor: paying ? 'default' : 'pointer', transition: 'background 0.2s ease',
                 }}
                 onClick={handlePay}
                 disabled={paying || payAmount === 0}

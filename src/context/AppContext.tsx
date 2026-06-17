@@ -1,15 +1,17 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { CartItem, GroupMember, Toast, MenuItem } from '@/data/menu';
+import { CartItem, GroupMember, Toast, MenuItem, Order, OrderLineItem, OrderStatus } from '@/data/menu';
 import { db } from '@/lib/firebase';
 import { ref, set, update, remove, onValue, onDisconnect } from 'firebase/database';
+import { api } from '@/lib/api';
 
 export type Screen = 'welcome' | 'menu' | 'detail' | 'viewer3d' | 'order' | 'waiting' | 'payment';
 
 const MAX_TOASTS = 3;
 const TOAST_DURATION = 3000;
 const TABLE_ID = 'T7';
+const QUEUE_WINDOW_MS = 5 * 60 * 1000; // 5-min rule: adds beyond this start a new queue
 
 interface FirebaseMember {
   id: string;
@@ -27,7 +29,8 @@ interface AppState {
   selectedItem: MenuItem | null;
   toasts: Toast[];
   newJoiner: { name: string; initials: string } | null;
-  orderStatus: string;
+  orders: Order[];
+  queueNotice: { round: number } | null;
   showPayment: boolean;
   itemQuantity: number;
   itemExtras: string[];
@@ -51,7 +54,8 @@ interface AppContextType extends AppState {
   getCartCount: () => number;
   showToast: (message: string, initials?: string, success?: boolean) => void;
   dismissToast: (id: string) => void;
-  setOrderStatus: (status: string) => void;
+  placeOrder: (kitchenNotes?: string) => Promise<void>;
+  clearQueueNotice: () => void;
   setShowPayment: (show: boolean) => void;
   setItemQuantity: (qty: number) => void;
   addItemExtra: (extraId: string) => void;
@@ -99,6 +103,30 @@ function parseItems(itemsJson: string): CartItem[] {
   try { return JSON.parse(itemsJson || '[]'); } catch { return []; }
 }
 
+function toArray<T>(val: unknown): T[] {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.filter(Boolean) as T[];
+  return Object.values(val as Record<string, T>);
+}
+
+function parseOrders(val: unknown): Order[] {
+  if (!val) return [];
+  return Object.entries(val as Record<string, Record<string, unknown>>)
+    .map(([id, raw]) => ({
+      id,
+      round: Number(raw.round) || 1,
+      placedAt: Number(raw.placedAt) || 0,
+      etaMinutes: Number(raw.etaMinutes) || 18,
+      status: (raw.status as OrderStatus) || 'placed',
+      lineItems: toArray<OrderLineItem>(raw.lineItems),
+      paid: !!raw.paid,
+      paymentMethod: raw.paymentMethod as string | undefined,
+      paidAt: raw.paidAt as number | undefined,
+      kitchenNotes: raw.kitchenNotes as string | undefined,
+    }))
+    .sort((a, b) => a.placedAt - b.placedAt);
+}
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const sessionId = useRef(getOrCreateSessionId()).current;
 
@@ -111,6 +139,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Ref so cart callbacks can read current members without stale closures
   const groupMembersRef = useRef<GroupMember[]>([]);
+  const ordersRef = useRef<Order[]>([]);
 
   const [state, setState] = useState<AppState>({
     screen: 'welcome',
@@ -126,7 +155,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     selectedItem: null,
     toasts: [],
     newJoiner: null,
-    orderStatus: 'idle',
+    orders: [],
+    queueNotice: null,
     showPayment: false,
     itemQuantity: 1,
     itemExtras: [],
@@ -136,6 +166,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Keep ref current so cart callbacks don't capture stale state
   useEffect(() => { groupMembersRef.current = state.groupMembers; }, [state.groupMembers]);
+  useEffect(() => { ordersRef.current = state.orders; }, [state.orders]);
 
   // ─── Toast helpers ──────────────────────────────────────────────────────────
 
@@ -224,27 +255,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => unsub();
   }, [sessionId, addToast]);
 
-  // ─── Firebase: listen to orderStatus ────────────────────────────────────────
+  // ─── Firebase: listen to the orders timeline ────────────────────────────────
+  // No forced navigation — placing an order surfaces the tracker pill instead.
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const statusRef = ref(db, `tables/${TABLE_ID}/orderStatus`);
-    const unsub = onValue(statusRef, (snapshot) => {
-      const status = snapshot.val() as string | null;
-      if (!status) return;
-      setState(s => {
-        // Auto-navigate only users who have joined (have a name) and aren't already on the order flow
-        const alreadyOnOrderPath = ['order', 'waiting', 'payment'].includes(s.screen);
-        const hasJoined = !!s.userName;
-        return {
-          ...s,
-          orderStatus: status,
-          screen: (status === 'placed' && hasJoined && !alreadyOnOrderPath) ? 'waiting' : s.screen,
-        };
-      });
+    const ordersListRef = ref(db, `tables/${TABLE_ID}/orders`);
+    const unsub = onValue(ordersListRef, (snapshot) => {
+      const orders = parseOrders(snapshot.val());
+      setState(s => ({ ...s, orders }));
     });
     return () => unsub();
   }, []);
+
+  // ─── Firebase: clear my local cart when the backend clears it (order placed) ──
+  // The members listener ignores self, so this is how a placement made on another
+  // device (which clears every cart server-side) reaches my own cart.
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const myItemsRef = ref(db, `tables/${TABLE_ID}/members/${sessionId}/itemsJson`);
+    const unsub = onValue(myItemsRef, (snapshot) => {
+      if (snapshot.val() !== '[]') return;
+      setState(s => {
+        const me = s.groupMembers.find(m => m.isCurrentUser);
+        if (!me || me.items.length === 0) return s;
+        return { ...s, groupMembers: s.groupMembers.map(m => m.isCurrentUser ? { ...m, items: [] } : m) };
+      });
+    });
+    return () => unsub();
+  }, [sessionId]);
 
   // ─── Firebase connection indicator ──────────────────────────────────────────
 
@@ -301,8 +341,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // ─── Reset order ────────────────────────────────────────────────────────────
 
   const resetOrder = useCallback(async () => {
+    try { await api.resetTable(TABLE_ID); } catch {}
     try { await remove(ref(db, `tables/${TABLE_ID}/members/${sessionId}`)); } catch {}
-    try { await remove(ref(db, `tables/${TABLE_ID}/orderStatus`)); } catch {}
 
     if (typeof window !== 'undefined') {
       try { localStorage.removeItem('menuva-state'); } catch {}
@@ -321,7 +361,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       selectedItem: null,
       toasts: [],
       newJoiner: null,
-      orderStatus: 'idle',
+      orders: [],
+      queueNotice: null,
       showPayment: false,
       itemQuantity: 1,
       itemExtras: [],
@@ -353,10 +394,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   })), []);
   const setItemQuantity = useCallback((itemQuantity: number) => setState(s => ({ ...s, itemQuantity })), []);
   const setSelectedCategory = useCallback((selectedCategory: string) => setState(s => ({ ...s, selectedCategory })), []);
-  const setOrderStatus = useCallback((orderStatus: string) => {
-    setState(s => ({ ...s, orderStatus }));
-    set(ref(db, `tables/${TABLE_ID}/orderStatus`), orderStatus).catch(() => {});
-  }, []);
+  const placeOrder = useCallback(async (kitchenNotes?: string) => {
+    const me = groupMembersRef.current.find(m => m.isCurrentUser);
+    // Make sure the backend reads my latest cart before it snapshots the order.
+    if (me) {
+      try {
+        await update(ref(db, `tables/${TABLE_ID}/members/${sessionId}`), {
+          itemsJson: JSON.stringify(me.items),
+        });
+      } catch { /* ignore */ }
+    }
+    await api.placeOrder(TABLE_ID, kitchenNotes);
+    // Backend cleared the RTDB carts; clear my local cart + any queue notice to match.
+    setState(s => ({
+      ...s,
+      queueNotice: null,
+      groupMembers: s.groupMembers.map(m => m.isCurrentUser ? { ...m, items: [] } : m),
+    }));
+  }, [sessionId]);
+
+  const clearQueueNotice = useCallback(() => setState(s => ({ ...s, queueNotice: null })), []);
   const setShowPayment = useCallback((showPayment: boolean) => setState(s => ({ ...s, showPayment })), []);
   const addItemExtra = useCallback((extraId: string) => setState(s => ({
     ...s, itemExtras: s.itemExtras.includes(extraId) ? s.itemExtras : [...s.itemExtras, extraId],
@@ -379,12 +436,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ? me.items.map((i, idx) => idx === existingIdx ? { ...i, quantity: i.quantity + quantity } : i)
       : [...me.items, { ...item, quantity, extras }];
 
+    // 5-minute rule: if the last order was placed >5 min ago, adding now starts a
+    // NEW order queue — surface that before they place.
+    const orders = ordersRef.current;
+    const latest = orders.length ? orders[orders.length - 1] : null;
+    const startsNewQueue = !!latest && Date.now() - latest.placedAt > QUEUE_WINDOW_MS;
+
     // Side effects outside setState — won't double-fire under React Strict Mode
     addToast({ id: Date.now().toString(), message: `${me.name || 'You'} added ${item.name}`, success: true });
     syncCartToFirebase(newItems);
     setState(s => ({
       ...s,
       groupMembers: s.groupMembers.map(m => m.isCurrentUser ? { ...m, items: newItems } : m),
+      queueNotice: startsNewQueue ? { round: latest!.round + 1 } : s.queueNotice,
     }));
   }, [addToast, syncCartToFirebase]);
 
@@ -477,7 +541,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     getCartCount,
     showToast,
     dismissToast,
-    setOrderStatus,
+    placeOrder,
+    clearQueueNotice,
     setShowPayment,
     setItemQuantity,
     addItemExtra,

@@ -160,15 +160,15 @@ interface ButtonProps {
 
 export function Button({ children, variant = 'primary', disabled, style = {}, onClick, type = 'button' }: ButtonProps) {
   const base: React.CSSProperties = {
-    height: 52, borderRadius: 100, width: '100%',
+    height: 54, borderRadius: 14, width: '100%',
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-    fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 15,
+    fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 16,
     border: 'none', cursor: disabled ? 'not-allowed' : 'pointer', padding: '0 24px',
     letterSpacing: '-0.005em', transition: 'transform 0.12s ease, opacity 0.12s ease',
     opacity: disabled ? 0.55 : 1,
   };
   let variantStyle: React.CSSProperties = {};
-  if (variant === 'primary') variantStyle = { background: 'var(--accent)', color: '#fff' };
+  if (variant === 'primary') variantStyle = { background: 'var(--accent)', color: '#fff', boxShadow: disabled ? 'none' : '0 8px 20px -8px rgba(200,118,10,0.6)' };
   else if (variant === 'secondary') variantStyle = { background: 'transparent', color: 'var(--ink)', border: '1.5px solid var(--border)' };
   else if (variant === 'ghost') variantStyle = { background: 'transparent', color: 'var(--error)' };
   return (
@@ -293,15 +293,29 @@ export function Toast({ message, success, initials, onDismiss }: {
   );
 }
 
-export function FoodTile({ emoji, size = 80, radius = 16, bg = 'var(--surface)' }: {
-  emoji: string; size?: number; radius?: number; bg?: string;
+export function FoodTile({ emoji, image, alt, size = 80, radius = 16, bg = 'var(--surface)' }: {
+  emoji: string; image?: string; alt?: string; size?: number; radius?: number; bg?: string;
 }) {
+  const [failed, setFailed] = React.useState(false);
+  const showImage = !!image && !failed;
   return (
     <div style={{
-      width: size, height: size, borderRadius: radius, background: bg,
+      width: size, height: size, borderRadius: radius,
+      background: showImage ? 'var(--surface-2)' : bg,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: size * 0.55, flexShrink: 0, userSelect: 'none',
-    }}>{emoji}</div>
+      fontSize: size * 0.55, flexShrink: 0, userSelect: 'none', overflow: 'hidden',
+    }}>
+      {showImage ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={image}
+          alt={alt || ''}
+          loading="lazy"
+          onError={() => setFailed(true)}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+        />
+      ) : emoji}
+    </div>
   );
 }
 

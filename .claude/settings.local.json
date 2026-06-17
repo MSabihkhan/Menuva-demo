@@ -5,7 +5,8 @@
       "Bash(not exist *)",
       "Bash(npx tsc *)",
       "Bash(npm run *)",
-      "Bash(Remove-Item *)"
+      "Bash(Remove-Item *)",
+      "Bash(echo \"---TYPECHECK DONE \\(exit $?\\)---\")"
     ]
   }
 }

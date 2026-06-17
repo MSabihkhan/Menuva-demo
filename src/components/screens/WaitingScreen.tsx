@@ -2,8 +2,10 @@
 
 import React, { useEffect, useCallback, useState } from 'react';
 import { useApp } from '@/context/AppContext';
-import { ScreenFrame, Chip, Avatar, Button, SmallOutlineButton, FoodTile, Toast, Input, BackButton } from '../primitives';
-import { MENU_ITEMS } from '@/data/menu';
+import { ScreenFrame, Chip, Button, SmallOutlineButton, FoodTile, Toast, Input, BackButton } from '../primitives';
+import { MENU_ITEMS, ITEM_BY_ID, Order } from '@/data/menu';
+
+// ── Stepper (per order) ────────────────────────────────────────────────────────
 
 function StepperNode({ state, label }: { state: 'done' | 'current' | 'future'; label: string }) {
   let bg: string, content: React.ReactNode;
@@ -36,22 +38,23 @@ function StepperNode({ state, label }: { state: 'done' | 'current' | 'future'; l
   );
 }
 
-function Stepper({ orderStatus }: { orderStatus: string }) {
-  const preparingState: 'done' | 'current' =
-    orderStatus === 'preparing' || orderStatus === 'ready' ? 'done' : 'current';
-  const readyState: 'done' | 'future' = orderStatus === 'ready' ? 'done' : 'future';
+function Stepper({ status }: { status: Order['status'] }) {
+  const cooking = status === 'preparing' || status === 'ready' || status === 'served';
+  const done = status === 'ready' || status === 'served';
+  const preparingState: 'done' | 'current' = cooking ? 'done' : 'current';
+  const readyState: 'done' | 'future' = done ? 'done' : 'future';
   const steps = [
     { state: 'done' as const, label: 'Placed' },
     { state: 'done' as const, label: 'Received' },
     { state: preparingState, label: 'Preparing' },
-    { state: readyState, label: 'Ready' },
+    { state: readyState, label: status === 'served' ? 'Served' : 'Ready' },
   ];
   return (
     <div style={{ position: 'relative', padding: '0 16px' }}>
       <div style={{ position: 'absolute', left: 42, right: 42, top: 14, height: 2, display: 'flex' }}>
         <div style={{ flex: 1, background: 'var(--success)' }}/>
         <div style={{ flex: 1, background: 'var(--success)' }}/>
-        <div style={{ flex: 1, background: readyState === 'done' ? 'var(--success)' : 'var(--border)' }}/>
+        <div style={{ flex: 1, background: done ? 'var(--success)' : 'var(--border)' }}/>
       </div>
       <div style={{ display: 'flex', position: 'relative' }}>
         {steps.map(s => <StepperNode key={s.label} state={s.state} label={s.label} />)}
@@ -60,28 +63,80 @@ function Stepper({ orderStatus }: { orderStatus: string }) {
   );
 }
 
-function TimeRing({ minutes = 18 }: { minutes?: number }) {
-  const size = 120, stroke = 2.5, r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
+// ── Live ETA countdown ─────────────────────────────────────────────────────────
+
+function useNow(active: boolean) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
+
+function OrderCard({ order }: { order: Order }) {
+  const ready = order.status === 'ready' || order.status === 'served';
+  const now = useNow(!ready);
+  const remMs = Math.max(0, order.placedAt + order.etaMinutes * 60000 - now);
+  const mm = Math.floor(remMs / 60000);
+  const ss = Math.floor((remMs % 60000) / 1000);
+  const subtotal = order.lineItems.reduce((s, li) => s + li.price * li.quantity, 0);
+
   return (
-    <div style={{ position: 'relative', width: size, height: size }}>
-      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
-        <circle cx={size/2} cy={size/2} r={r} stroke="var(--border)" strokeWidth={stroke} fill="none"/>
-        <circle cx={size/2} cy={size/2} r={r} stroke="var(--accent)" strokeWidth={stroke} fill="none"
-          strokeDasharray={`${c * 0.72} ${c}`} strokeLinecap="round"/>
-      </svg>
-      <div style={{
-        position: 'absolute', inset: 0,
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <div style={{ fontFamily: 'var(--font-display)', fontSize: 34, color: 'var(--ink)', lineHeight: 1 }}>~{minutes}</div>
-        <div style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--ink-2)', marginTop: 2 }}>min</div>
+    <div style={{ background: '#fff', borderRadius: 16, border: '1px solid var(--border)', padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 15, color: 'var(--ink)' }}>
+          Order {order.round}
+        </div>
+        <Chip size="sm">{ready ? (order.status === 'served' ? 'served' : 'ready 🎉') : order.status}</Chip>
+      </div>
+
+      <Stepper status={order.status} />
+
+      {/* ETA */}
+      <div style={{ textAlign: 'center' }}>
+        {ready ? (
+          <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 14, color: 'var(--success)' }}>
+            {order.status === 'served' ? 'Enjoy your meal! 🍽️' : 'Ready to serve! 🎉'}
+          </div>
+        ) : (
+          <div style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--ink-2)' }}>
+            Arriving in <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{mm}:{ss.toString().padStart(2, '0')}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Line items */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid var(--surface)', paddingTop: 12 }}>
+        {order.lineItems.map((li, i) => {
+          const meta = ITEM_BY_ID[li.id];
+          return (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <FoodTile emoji={meta?.emoji || '🍽️'} image={meta?.image} alt={li.name} size={38} radius={10} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: 'var(--font-sans)', fontSize: 13.5, color: 'var(--ink)' }}>
+                  {li.name}{li.quantity > 1 ? <span style={{ color: 'var(--ink-3)' }}> ×{li.quantity}</span> : null}
+                </div>
+                <div style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--ink-3)' }}>{li.byName}</div>
+              </div>
+              <div style={{ fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 600, color: 'var(--ink-2)' }}>PKR {(li.price * li.quantity).toLocaleString()}</div>
+            </div>
+          );
+        })}
+        <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 4 }}>
+          <span style={{ fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>Subtotal</span>
+          <span style={{ fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 600, color: 'var(--accent)' }}>PKR {subtotal.toLocaleString()}</span>
+        </div>
       </div>
     </div>
   );
 }
 
-const PING_COOLDOWN_S = 60; // 1 minute
+// ── Ping waiter ─────────────────────────────────────────────────────────────────
+
+const PING_COOLDOWN_S = 60;
 
 function PingButton({ onPing }: { onPing: (msg: string) => void }) {
   const [countdown, setCountdown] = useState(0);
@@ -142,18 +197,16 @@ function PingButton({ onPing }: { onPing: (msg: string) => void }) {
 
 const CHAI_ITEM = MENU_ITEMS.find(i => i.name === 'Peshwari Chai');
 
-export function WaitingScreen() {
-  const { groupMembers, toasts, dismissToast, setScreen, showToast, orderStatus, addToCart, goBack } = useApp();
+// ── Main screen ─────────────────────────────────────────────────────────────────
 
-  // Derive from actual cart so state persists across navigations and syncs across devices
+export function WaitingScreen() {
+  const { orders, toasts, dismissToast, setScreen, showToast, addToCart, goBack, groupMembers } = useApp();
+
   const chaiAdded = groupMembers.some(m => m.items.some(i => i.id === CHAI_ITEM?.id));
 
   const handlePing = useCallback((msg: string) => {
-    if (msg.trim()) {
-      showToast(`"${msg}" sent to waiter!`, undefined, true);
-    } else {
-      showToast('Waiter has been notified!', undefined, true);
-    }
+    if (msg.trim()) showToast(`"${msg}" sent to waiter!`, undefined, true);
+    else showToast('Waiter has been notified!', undefined, true);
   }, [showToast]);
 
   const handleAddChai = () => {
@@ -162,8 +215,6 @@ export function WaitingScreen() {
       showToast(`${CHAI_ITEM.name} added!`, undefined, true);
     }
   };
-
-  const membersWithItems = groupMembers.filter(m => m.items.length > 0);
 
   return (
     <ScreenFrame>
@@ -174,7 +225,6 @@ export function WaitingScreen() {
         </div>
       ))}
 
-      {/* Back to menu */}
       <BackButton onClick={goBack} />
 
       {/* Scrollable content */}
@@ -183,44 +233,26 @@ export function WaitingScreen() {
         overflowY: 'auto', overflowX: 'hidden',
         WebkitOverflowScrolling: 'touch' as React.CSSProperties['WebkitOverflowScrolling'],
         padding: '16px 20px 32px',
-        display: 'flex', flexDirection: 'column', gap: 20,
+        display: 'flex', flexDirection: 'column', gap: 18,
       }}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 44 }}>
           <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, color: 'var(--ink)', letterSpacing: '-0.01em' }}>
-            Order Placed
+            {orders.length > 1 ? 'Your Orders' : 'Your Order'}
           </div>
           <Chip muted size="sm">Table 7</Chip>
         </div>
 
-        {/* Stepper */}
-        <Stepper orderStatus={orderStatus} />
-
-        {/* Time ring */}
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <TimeRing />
-        </div>
-
-        {/* Per-member status */}
-        {membersWithItems.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {membersWithItems.map(member => (
-              <div key={member.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <Avatar initials={member.initials} size={32} style={{ border: 'none', flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{
-                    fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.35,
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>
-                    <span style={{ fontWeight: 500, color: 'var(--ink)' }}>{member.name}</span>
-                    {' · '}
-                    {member.items.map(i => i.name).join(', ')}
-                  </div>
-                </div>
-                <Chip size="sm">preparing</Chip>
-              </div>
-            ))}
+        {/* Orders */}
+        {orders.length === 0 ? (
+          <div style={{
+            background: 'var(--surface)', borderRadius: 16, padding: 24,
+            textAlign: 'center', fontFamily: 'var(--font-sans)', fontSize: 14, color: 'var(--ink-3)',
+          }}>
+            No active orders yet. Add items from the menu and place your order.
           </div>
+        ) : (
+          orders.map(o => <OrderCard key={o.id} order={o} />)
         )}
 
         {/* Chai upsell */}
@@ -246,10 +278,10 @@ export function WaitingScreen() {
           </SmallOutlineButton>
         </div>
 
-        {/* Ping waiter section */}
+        {/* Ping waiter */}
         <PingButton onPing={handlePing} />
 
-        {/* Request bill */}
+        {/* Request bill / add more */}
         <div style={{
           borderTop: '1px solid var(--border)', paddingTop: 20,
           display: 'flex', flexDirection: 'column', gap: 10,

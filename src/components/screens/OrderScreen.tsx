@@ -7,29 +7,35 @@ import { MENU_ITEMS } from '@/data/menu';
 
 function PersonCard({ avatar, name, items, subtotal }: {
   avatar: string; name: string;
-  items: { name: string; price: number; quantity: number }[];
+  items: { name: string; price: number; quantity: number; emoji: string; image?: string }[];
   subtotal: number;
 }) {
   return (
     <div style={{
-      background: '#fff', borderRadius: 16, border: '1px solid var(--border)', padding: 16,
+      background: '#fff', borderRadius: 18, border: '1px solid var(--border)', padding: 16,
+      boxShadow: '0 8px 24px -16px rgba(0,0,0,0.18)',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <Avatar initials={avatar} size={36} style={{ border: 'none' }} />
-        <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 15, color: 'var(--ink)' }}>{name}</div>
+        <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 15, color: 'var(--ink)' }}>{name}</div>
         <div style={{ marginLeft: 'auto', fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--ink-3)' }}>
           {items.length} item{items.length !== 1 ? 's' : ''}
         </div>
       </div>
-      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {items.map((it, i) => (
-          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-sans)', fontSize: 14, color: 'var(--ink-2)' }}>
-            <span>{it.quantity > 1 ? `${it.name} ×${it.quantity}` : it.name}</span>
-            <span>PKR {(it.price * it.quantity).toLocaleString()}</span>
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <FoodTile emoji={it.emoji} image={it.image} alt={it.name} size={42} radius={11} />
+            <div style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-sans)', fontSize: 14, color: 'var(--ink)' }}>
+              {it.name}{it.quantity > 1 ? <span style={{ color: 'var(--ink-3)' }}> ×{it.quantity}</span> : null}
+            </div>
+            <div style={{ fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: 600, color: 'var(--ink-2)' }}>
+              PKR {(it.price * it.quantity).toLocaleString()}
+            </div>
           </div>
         ))}
       </div>
-      <Divider style={{ margin: '12px 0' }} />
+      <Divider style={{ margin: '14px 0' }} />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--ink-3)' }}>{name}'s total</div>
         <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 15, color: 'var(--accent)' }}>
@@ -41,28 +47,37 @@ function PersonCard({ avatar, name, items, subtotal }: {
 }
 
 export function OrderScreen() {
-  const { groupMembers, getCartTotal, setScreen, goBack, showToast, setOrderStatus, addToCart, orderStatus } = useApp();
+  const { groupMembers, getCartTotal, setScreen, goBack, showToast, placeOrder, addToCart, orders } = useApp();
   const [kitchenNotes, setKitchenNotes] = useState('');
+  const [placing, setPlacing] = useState(false);
 
   const subtotal = getCartTotal();
   const tax = Math.round(subtotal * 0.16);
   const total = subtotal + tax;
 
   const allMembers = groupMembers.filter(m => m.items.length > 0);
-  const alreadyPlaced = orderStatus === 'placed' || orderStatus === 'waiting';
+  const hasActiveOrders = orders.length > 0;
 
   // Derive grill upsell state from the actual cart so it stays in sync across devices
   const grillItem = MENU_ITEMS.find(i => i.name === 'Mixed Grill Platter');
   const grillAdded = groupMembers.some(m => m.items.some(i => i.id === grillItem?.id));
 
-  const handlePlaceOrder = () => {
+  const handlePlaceOrder = async () => {
     if (allMembers.length === 0) {
       showToast('Add some items first!');
       return;
     }
-    setOrderStatus('placed');
-    showToast('Order placed! Kitchen is notified.', undefined, true);
-    setScreen('waiting');
+    setPlacing(true);
+    try {
+      await placeOrder(kitchenNotes);
+      showToast('Order placed! Kitchen is notified.', undefined, true);
+      // Back to the menu — the tracker pill now shows status. No forced waiting screen.
+      setScreen('menu');
+    } catch {
+      showToast('Could not place order. Please try again.');
+    } finally {
+      setPlacing(false);
+    }
   };
 
   return (
@@ -100,7 +115,7 @@ export function OrderScreen() {
                 key={member.id}
                 avatar={member.initials}
                 name={member.name}
-                items={member.items.map(i => ({ name: i.name, price: i.price, quantity: i.quantity }))}
+                items={member.items.map(i => ({ name: i.name, price: i.price, quantity: i.quantity, emoji: i.emoji, image: i.image }))}
                 subtotal={member.items.reduce((sum, i) => sum + i.price * i.quantity, 0)}
               />
             ))}
@@ -125,7 +140,7 @@ export function OrderScreen() {
           border: '1px solid rgba(200,118,10,0.2)', padding: 14,
           display: 'flex', gap: 12, alignItems: 'center',
         }}>
-          <FoodTile emoji="🍖" size={48} bg="#FDEACC" />
+          <FoodTile emoji="🍖" image={grillItem?.image} alt="Mixed Grill Platter" size={48} radius={12} bg="#FDEACC" />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontFamily: 'var(--font-sans)', fontStyle: 'italic', fontSize: 13, color: 'var(--ink-2)' }}>
               Since you're all together—
@@ -168,13 +183,19 @@ export function OrderScreen() {
         padding: '10px 20px 12px',
         background: 'linear-gradient(to bottom, rgba(255,255,255,0) 0%, #fff 35%)',
       }}>
-        {alreadyPlaced ? (
-          <Button onClick={() => setScreen('waiting')}>
-            Track Order →
-          </Button>
+        {allMembers.length === 0 ? (
+          hasActiveOrders ? (
+            <Button onClick={() => setScreen('waiting')}>
+              Track Order →
+            </Button>
+          ) : (
+            <Button onClick={handlePlaceOrder} disabled>
+              Place Order
+            </Button>
+          )
         ) : (
-          <Button onClick={handlePlaceOrder} disabled={allMembers.length === 0}>
-            Place Order
+          <Button onClick={handlePlaceOrder} disabled={placing}>
+            {placing ? 'Placing…' : 'Place Order'}
           </Button>
         )}
       </div>

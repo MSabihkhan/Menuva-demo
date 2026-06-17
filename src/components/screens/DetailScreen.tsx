@@ -209,6 +209,7 @@ export function DetailScreen() {
   } = useApp();
 
   const [showUpsell, setShowUpsell] = useState(false);
+  const [heroFailed, setHeroFailed] = useState(false);
 
   useEffect(() => {
     if (!selectedItem) goBack();
@@ -245,17 +246,29 @@ export function DetailScreen() {
           <SheetHandle />
         </div>
 
-        {/* Emoji hero → 3D viewer */}
+        {/* Photo hero → 3D viewer */}
         <div
           style={{
-            height: 200, width: '100%', background: 'var(--surface)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 105, flexShrink: 0, cursor: 'pointer', position: 'relative',
-            userSelect: 'none',
+            height: 220, width: '100%', background: 'var(--surface-2)',
+            flexShrink: 0, cursor: 'pointer', position: 'relative',
+            userSelect: 'none', overflow: 'hidden',
           }}
           onClick={() => setScreen('viewer3d')}
         >
-          {selectedItem.emoji}
+          {selectedItem.image && !heroFailed ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={selectedItem.image}
+              alt={selectedItem.name}
+              onError={() => setHeroFailed(true)}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
+          ) : (
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 105, background: 'var(--surface)' }}>
+              {selectedItem.emoji}
+            </div>
+          )}
+          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.28), transparent 50%)', pointerEvents: 'none' }} />
           <div style={{
             position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)',
             background: 'var(--accent)', color: '#fff', borderRadius: 100,

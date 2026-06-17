@@ -2,6 +2,7 @@
 
 import React, { Suspense, lazy, useTransition } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
+import { OrderTrackerPill, QueueNoticePopup } from './OrderTracker';
 
 // ── Lazy screen imports ──────────────────────────────────────────────────────
 
@@ -172,6 +173,8 @@ export function OptimizedApp({ screen, newJoiner, clearNewJoiner }: OptimizedApp
           <Component />
         </Suspense>
       </ErrorBoundary>
+      <OrderTrackerPill />
+      <QueueNoticePopup />
     </div>
   );
 }
