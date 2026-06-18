@@ -1,0 +1,15 @@
+# Render Blueprint for the Menuva Express backend.
+# Render → New → Blueprint → pick this repo/branch to deploy in one click.
+services:
+  - type: web
+    name: menuva-backend
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: CORS_ORIGIN
+        value: "*"
