@@ -98,6 +98,15 @@ export function Viewer3DScreen() {
 
   return (
     <ScreenFrame dark>
+      {/* Premium studio backdrop — warm amber spotlight + soft vignette,
+          replaces the flat black so the dish feels staged, not floating in void. */}
+      <div style={{
+        position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none',
+        background:
+          'radial-gradient(58% 40% at 50% 42%, rgba(200,118,10,0.20) 0%, transparent 66%),' +
+          'radial-gradient(135% 100% at 50% 30%, #2d2723 0%, #1a1612 46%, #0b0a09 100%)',
+      }}/>
+
       {/* Close button */}
       <div
         style={{
@@ -157,18 +166,30 @@ export function Viewer3DScreen() {
         ) : hasRealModel ? (
           // Real GLB model via <model-viewer>, AR-enabled. model-viewer shows its
           // built-in "View in your space" button automatically on AR-capable phones.
+          // disable-pan + bounded orbit keep the dish centered & sized consistently
+          // (no drifting on drag); ar-scale="fixed" stops the AR model resizing on
+          // the table; environment-image="neutral" gives soft studio reflections.
           // @ts-expect-error — declared in src/types/model-viewer.d.ts
           <model-viewer
             src={selectedItem.modelUrl}
             alt={selectedItem.name}
             auto-rotate
+            auto-rotate-delay="800"
+            rotation-per-second="20deg"
             camera-controls
+            disable-pan
+            interaction-prompt="none"
             touch-action="pan-y"
-            shadow-intensity="1"
-            exposure="1.1"
+            environment-image="neutral"
+            shadow-intensity="1.5"
+            shadow-softness="0.9"
+            exposure="1.05"
+            camera-orbit="0deg 72deg 105%"
+            min-camera-orbit="auto 35deg 85%"
+            max-camera-orbit="auto 92deg 150%"
             ar
             ar-modes="webxr scene-viewer quick-look"
-            ar-scale="auto"
+            ar-scale="fixed"
             ar-placement="floor"
             style={{
               width: '100%', height: '100%',
