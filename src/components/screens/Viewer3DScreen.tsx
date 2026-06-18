@@ -155,17 +155,23 @@ export function Viewer3DScreen() {
             }}>Loading 3D model…</div>
           </div>
         ) : hasRealModel ? (
-          // Real GLB model via <model-viewer>
+          // Real GLB model via <model-viewer>, AR-enabled. model-viewer shows its
+          // built-in "View in your space" button automatically on AR-capable phones.
           // @ts-expect-error — declared in src/types/model-viewer.d.ts
           <model-viewer
             src={selectedItem.modelUrl}
             alt={selectedItem.name}
             auto-rotate
             camera-controls
+            touch-action="pan-y"
             shadow-intensity="1"
             exposure="1.1"
+            ar
+            ar-modes="webxr scene-viewer quick-look"
+            ar-scale="auto"
+            ar-placement="floor"
             style={{
-              width: 280, height: 280,
+              width: '100%', height: '100%',
               background: 'transparent',
               '--progress-bar-color': 'var(--accent)',
             } as React.CSSProperties}
