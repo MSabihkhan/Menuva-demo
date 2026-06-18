@@ -66,10 +66,15 @@ export function usePWA() {
     }
   }, []);
 
-  // Register on mount
+  // Service worker is intentionally NOT registered — the old cache-first worker
+  // served stale builds. Actively unregister any previously-installed worker and
+  // clear its caches so visitors always get the latest deploy. (The /sw.js
+  // kill-switch heals tabs that still have the old worker controlling them.)
   useEffect(() => {
-    registerSW();
-  }, [registerSW]);
+    if (typeof window === 'undefined') return;
+    void unregisterSW();
+    void clearCache();
+  }, [unregisterSW, clearCache]);
 
   return {
     registerSW,

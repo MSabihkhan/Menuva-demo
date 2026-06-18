@@ -35,7 +35,7 @@ export interface Toast {
 export const CATEGORIES = ['All', 'Starters', 'Mains', 'Grills', 'Desserts', 'Drinks'];
 
 export const MENU_ITEMS: MenuItem[] = [
-  { id: '1', name: 'Chicken Karahi', desc: 'Slow-cooked with hand-crushed tomatoes & 12-spice masala', price: 1200, tag: 'Trending', emoji: '🍛', category: 'Mains', spicy: true, gluten: true, image: '/images/karahi.jpg' },
+  { id: '1', name: 'Chicken Karahi', desc: 'Slow-cooked with hand-crushed tomatoes & 12-spice masala', price: 1200, tag: 'Trending', emoji: '🍛', category: 'Mains', spicy: true, gluten: true, image: '/images/karahi.jpg', modelUrl: '/models/burger.glb' },
   { id: '2', name: 'Seekh Kebab Platter', desc: 'Minced beef skewers, charcoal-grilled, with mint chutney', price: 950, tag: 'New', emoji: '🍢', category: 'Grills', image: '/images/kebab.jpg' },
   { id: '3', name: 'Daal Makhani', desc: 'Black lentils simmered overnight in butter and cream', price: 650, tag: "Chef's Pick", emoji: '🥘', category: 'Mains', image: '/images/dal.jpg' },
   { id: '4', name: 'Shahi Tukray', desc: 'Saffron-soaked bread, cardamom cream, pistachio', price: 450, tag: null, emoji: '🍮', category: 'Desserts' },
