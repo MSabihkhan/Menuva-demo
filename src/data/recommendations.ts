@@ -1,14 +1,15 @@
 // ── Waiter-style upsell engine ────────────────────────────────────────────────
-// Hardcoded pairing rules that read the live cart and surface the single most
-// relevant complementary dish — the way a sharp waiter reads a table and says
-// "you'll want naan with that." Rules are prioritised; the highest-priority
-// applicable suggestion (not already in the cart) wins.
+// Hardcoded pairing rules that read the live cart and surface complementary
+// dishes the way a sharp waiter reads a table. Every rule sits in a "lane" so
+// the picks span different ideas — a plate-completer (naan/raita) AND a
+// meal-rounder (mixed grill / dessert / chai) — instead of two near-identical
+// sides. Highest-priority applicable rule per lane wins.
 
 import { MenuItem, ITEM_BY_ID } from './menu';
 
 export interface Suggestion {
   item: MenuItem;
-  headline: string; // short hook, e.g. "Tame the heat"
+  headline: string; // short hook, e.g. "Tame the spice"
   reason: string;   // the waiter's pitch
   badge: string;    // social-proof / context chip, e.g. "Most paired"
 }
@@ -18,6 +19,9 @@ export interface CartCtx {
   category: string;
   spicy?: boolean;
 }
+
+// plate = completes the dish · round = rounds out / upgrades the meal
+export type Lane = 'plate' | 'round';
 
 interface Analysis {
   ids: Set<string>;
@@ -44,6 +48,7 @@ function analyze(cart: CartCtx[]): Analysis {
 
 interface Rule {
   suggestId: string;
+  lane: Lane;
   priority: number;
   badge: string;
   headline: string;
@@ -51,76 +56,107 @@ interface Rule {
   applies: (a: Analysis) => boolean;
 }
 
-// Higher priority = a sharper, more contextual pairing.
 const RULES: Rule[] = [
+  // ── plate: complete the dish ──────────────────────────────────────────────
   {
-    suggestId: '9', priority: 95, badge: 'Cools the heat', headline: 'Tame the spice',
+    suggestId: '9', lane: 'plate', priority: 95, badge: 'Cools the heat', headline: 'Tame the spice',
     reason: 'That masala packs real heat — a cool mint raita is how Lahori regulars balance every bite.',
     applies: a => a.hasSpicy && !a.ids.has('9'),
   },
   {
-    suggestId: '9', priority: 90, badge: 'The classic combo', headline: 'Biryani’s best friend',
-    reason: 'Biryani without raita? Not at this table. The cool yogurt cuts the spice perfectly.',
+    suggestId: '9', lane: 'plate', priority: 90, badge: 'The classic combo', headline: 'Biryani’s best friend',
+    reason: 'Biryani without raita? Not at this table. The cool yogurt cuts right through the spice.',
     applies: a => a.ids.has('8') && !a.ids.has('9'),
   },
   {
-    suggestId: '10', priority: 80, badge: 'Most paired', headline: 'Scoop up every bite',
+    suggestId: '10', lane: 'plate', priority: 80, badge: 'Most paired', headline: 'Scoop up every bite',
     reason: 'Fresh tandoor naan, straight from the oven — you’ll want it to mop up all that rich gravy.',
     applies: a => a.cats.has('Mains') && !a.ids.has('10'),
   },
   {
-    suggestId: '10', priority: 75, badge: 'Grill essential', headline: 'Wrap it up',
+    suggestId: '10', lane: 'plate', priority: 75, badge: 'Grill essential', headline: 'Wrap it up',
     reason: 'Charcoal kebabs were made for warm naan and a squeeze of lemon. Trust your waiter on this one.',
     applies: a => a.cats.has('Grills') && !a.ids.has('10'),
   },
   {
-    suggestId: '11', priority: 70, badge: 'For the table', headline: 'Feed the whole table',
+    suggestId: '9', lane: 'plate', priority: 60, badge: 'Cooling side', headline: 'Cool it down',
+    reason: 'A cucumber-mint raita is the side every kebab platter is quietly missing.',
+    applies: a => a.cats.has('Grills') && !a.ids.has('9'),
+  },
+
+  // ── round: upgrade / finish the meal ──────────────────────────────────────
+  {
+    suggestId: '11', lane: 'round', priority: 72, badge: 'For the table', headline: 'Feed the whole table',
     reason: 'Ordering for the group? The Mixed Grill — seekh, tikka & boti on one sizzling platter — is built to share.',
     applies: a => a.mainsAndGrills >= 2 && !a.ids.has('11'),
   },
   {
-    suggestId: '1', priority: 65, badge: 'Make it a meal', headline: 'Don’t stop at a starter',
+    suggestId: '1', lane: 'round', priority: 66, badge: 'Make it a meal', headline: 'Don’t stop at a starter',
     reason: 'Loving the tikka? Our signature Chicken Karahi turns it into a proper Lahori feast.',
     applies: a => a.startersOnly && !a.ids.has('1'),
   },
   {
-    suggestId: '6', priority: 50, badge: 'Local favourite', headline: 'Round it off',
-    reason: 'Finish like a local — slow-brewed Peshwari chai with cardamom. The perfect full stop to the meal.',
-    applies: a => a.count > 0 && !a.ids.has('6'),
-  },
-  {
-    suggestId: '4', priority: 45, badge: 'Save room', headline: 'Leave room for dessert',
+    suggestId: '4', lane: 'round', priority: 56, badge: 'Save room', headline: 'Leave room for dessert',
     reason: 'Shahi Tukray — saffron-soaked, cardamom cream, crushed pistachio. Regulars say it’s non-negotiable.',
     applies: a => (a.cats.has('Mains') || a.cats.has('Grills')) && !a.cats.has('Desserts') && !a.ids.has('4'),
   },
+  {
+    suggestId: '6', lane: 'round', priority: 52, badge: 'Local favourite', headline: 'Round it off',
+    reason: 'Finish like a local — slow-brewed Peshwari chai with cardamom. The perfect full stop to the meal.',
+    applies: a => a.count > 0 && !a.ids.has('6'),
+  },
 ];
 
-export function recommendMany(cart: CartCtx[], n = 1, exclude: string[] = []): Suggestion[] {
+export interface RecommendOpts {
+  exclude?: string[];
+  preferLanes?: Lane[]; // bias which lane is surfaced first (e.g. order screen → 'round')
+}
+
+export function recommendMany(cart: CartCtx[], n = 1, opts: RecommendOpts = {}): Suggestion[] {
+  const { exclude = [], preferLanes } = opts;
   const a = analyze(cart);
   const ex = new Set(exclude);
-  const out: Suggestion[] = [];
-  const used = new Set<string>();
 
-  for (const r of [...RULES].sort((x, y) => y.priority - x.priority)) {
-    if (out.length >= n) break;
-    if (ex.has(r.suggestId) || used.has(r.suggestId) || a.ids.has(r.suggestId)) continue;
-    if (!r.applies(a)) continue;
-    const item = ITEM_BY_ID[r.suggestId];
-    if (!item) continue;
-    out.push({ item, headline: r.headline, reason: r.reason, badge: r.badge });
-    used.add(r.suggestId);
+  const pool = RULES.filter(r => !ex.has(r.suggestId) && !a.ids.has(r.suggestId) && r.applies(a));
+  pool.sort((x, y) => y.priority - x.priority);
+  if (preferLanes && preferLanes.length) {
+    const rank = (l: Lane) => { const i = preferLanes.indexOf(l); return i === -1 ? 99 : i; };
+    pool.sort((x, y) => rank(x.lane) - rank(y.lane) || y.priority - x.priority);
   }
 
-  // Never show nothing: fall back to the house favourite.
+  const toSug = (r: Rule): Suggestion => ({ item: ITEM_BY_ID[r.suggestId], headline: r.headline, reason: r.reason, badge: r.badge });
+  const out: Suggestion[] = [];
+  const usedIds = new Set<string>();
+  const usedLanes = new Set<Lane>();
+
+  // Pass 1 — one per lane, so the picks always feel varied.
+  for (const r of pool) {
+    if (out.length >= n) break;
+    if (usedIds.has(r.suggestId) || usedLanes.has(r.lane) || !ITEM_BY_ID[r.suggestId]) continue;
+    out.push(toSug(r)); usedIds.add(r.suggestId); usedLanes.add(r.lane);
+  }
+  // Pass 2 — fill any remaining slots regardless of lane.
+  if (out.length < n) {
+    for (const r of pool) {
+      if (out.length >= n) break;
+      if (usedIds.has(r.suggestId) || !ITEM_BY_ID[r.suggestId]) continue;
+      out.push(toSug(r)); usedIds.add(r.suggestId);
+    }
+  }
+
+  // Never show nothing.
   if (out.length === 0) {
-    const fb = ITEM_BY_ID['1'];
-    if (fb && !a.ids.has('1') && !ex.has('1')) {
-      out.push({ item: fb, headline: 'Tonight’s favourite', reason: 'Can’t decide? Chicken Karahi is the dish every table comes back for.', badge: 'Trending' });
+    const fbId = a.ids.has('1') ? '6' : '1';
+    const fb = ITEM_BY_ID[fbId];
+    if (fb && !ex.has(fbId) && !a.ids.has(fbId)) {
+      out.push(fbId === '1'
+        ? { item: fb, headline: 'Tonight’s favourite', reason: 'Can’t decide? Chicken Karahi is the dish every table comes back for.', badge: 'Trending' }
+        : { item: fb, headline: 'Round it off', reason: 'A cup of cardamom Peshwari chai is the perfect way to finish.', badge: 'Local favourite' });
     }
   }
   return out;
 }
 
-export function recommend(cart: CartCtx[], exclude: string[] = []): Suggestion | null {
-  return recommendMany(cart, 1, exclude)[0] ?? null;
+export function recommend(cart: CartCtx[], opts: RecommendOpts = {}): Suggestion | null {
+  return recommendMany(cart, 1, opts)[0] ?? null;
 }

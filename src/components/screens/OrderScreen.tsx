@@ -61,7 +61,7 @@ export function OrderScreen() {
 
   // Smart waiter pairing, read from the whole table's cart.
   const cartCtx = groupMembers.flatMap(m => m.items).map(i => ({ id: i.id, category: i.category, spicy: i.spicy }));
-  const suggestion = recommend(cartCtx);
+  const suggestion = recommend(cartCtx, { preferLanes: ['round', 'plate'] });
 
   const handlePlaceOrder = async () => {
     if (allMembers.length === 0) {

@@ -15,7 +15,7 @@ function UpsellPopup({ addedItem, onDismiss }: { addedItem: MenuItem; onDismiss:
   const [suggestions] = useState<Suggestion[]>(() => {
     const me = groupMembers.find(m => m.isCurrentUser);
     const cart = (me?.items || []).map(i => ({ id: i.id, category: i.category, spicy: i.spicy }));
-    return recommendMany(cart, 2, [addedItem.id]);
+    return recommendMany(cart, 2, { exclude: [addedItem.id] });
   });
 
   useEffect(() => {

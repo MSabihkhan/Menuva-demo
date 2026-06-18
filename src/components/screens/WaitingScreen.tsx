@@ -207,7 +207,7 @@ export function WaitingScreen() {
     const m = ITEM_BY_ID[li.id];
     return { id: li.id, category: m?.category || '', spicy: m?.spicy };
   });
-  const suggestion = recommend(orderedCtx);
+  const suggestion = recommend(orderedCtx, { preferLanes: ['round', 'plate'] });
 
   const handlePing = useCallback((msg: string) => {
     if (msg.trim()) showToast(`"${msg}" sent to waiter!`, undefined, true);
