@@ -17,8 +17,12 @@ export function Viewer3DScreen() {
   const { selectedItem, setScreen, addToCart, goBack } = useApp();
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
+  const [tableMode, setTableMode] = useState(false);
+  const [cameraLive, setCameraLive] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const emojiRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const rotRef = useRef({ x: -8, y: 0, vx: 0, vy: 0.4 });
   const dragRef = useRef({ active: false, lastX: 0, lastY: 0 });
   const rafRef = useRef(0);
@@ -61,6 +65,40 @@ export function Viewer3DScreen() {
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
   }, [loading]);
+
+  // ── Pseudo-AR "view on your table" ──────────────────────────────────────────
+  // We deliberately avoid world-tracked AR (Scene Viewer / WebXR / Quick Look):
+  // that is what makes the dish drift and rescale. Instead we render a live
+  // rear-camera feed behind a screen-anchored, transparent <model-viewer> whose
+  // zoom and pan are locked — so the dish can be rotated but can never drift or
+  // change size. Starts the camera on entry; always releases tracks on exit.
+  useEffect(() => {
+    if (!tableMode) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } }, audio: false,
+        });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => {});
+        }
+        setCameraLive(true);
+      } catch {
+        // No camera, permission denied, or insecure context → drop back to studio.
+        if (!cancelled) setTableMode(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      setCameraLive(false);
+    };
+  }, [tableMode]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     dragRef.current.active = true;
@@ -107,6 +145,21 @@ export function Viewer3DScreen() {
           'radial-gradient(135% 100% at 50% 30%, #2d2723 0%, #1a1612 46%, #0b0a09 100%)',
       }}/>
 
+      {/* Live rear-camera feed for "view on your table" — sits behind the
+          transparent model-viewer. Covered by the studio backdrop until live. */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        style={{
+          position: 'absolute', inset: 0, zIndex: 1,
+          width: '100%', height: '100%', objectFit: 'cover',
+          opacity: cameraLive ? 1 : 0, transition: 'opacity 0.4s ease',
+          pointerEvents: 'none',
+        }}
+      />
+
       {/* Close button */}
       <div
         style={{
@@ -125,7 +178,7 @@ export function Viewer3DScreen() {
       <div
         ref={containerRef}
         style={{
-          position: 'absolute', left: 0, right: 0,
+          position: 'absolute', left: 0, right: 0, zIndex: 2,
           top: 100, bottom: loading ? 120 : 148,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           cursor: loading ? 'default' : isDragging ? 'grabbing' : 'grab',
@@ -164,36 +217,34 @@ export function Viewer3DScreen() {
             }}>Loading 3D model…</div>
           </div>
         ) : hasRealModel ? (
-          // Real GLB model via <model-viewer>, AR-enabled. model-viewer shows its
-          // built-in "View in your space" button automatically on AR-capable phones.
-          // disable-pan + bounded orbit keep the dish centered & sized consistently
-          // (no drifting on drag); ar-scale="fixed" stops the AR model resizing on
-          // the table; environment-image="neutral" gives soft studio reflections.
+          // Screen-anchored GLB viewer. disable-zoom + disable-pan are the core of
+          // the steady "view on your table" behaviour: the dish can only rotate, so
+          // it can never drift off-centre or change size. Transparent background lets
+          // the live camera feed (in table mode) or the studio backdrop show through.
+          // Shadow is dropped in table mode — a contact shadow with no real surface
+          // under it reads as fake.
           // @ts-expect-error — declared in src/types/model-viewer.d.ts
           <model-viewer
             src={selectedItem.modelUrl}
             alt={selectedItem.name}
-            auto-rotate
-            auto-rotate-delay="800"
-            rotation-per-second="20deg"
             camera-controls
+            disable-zoom
             disable-pan
+            auto-rotate
+            auto-rotate-delay="3000"
+            rotation-per-second="16deg"
             interaction-prompt="none"
-            touch-action="pan-y"
             environment-image="neutral"
-            shadow-intensity="1.5"
-            shadow-softness="0.9"
             exposure="1.05"
-            camera-orbit="0deg 72deg 105%"
-            min-camera-orbit="auto 35deg 85%"
-            max-camera-orbit="auto 92deg 150%"
-            ar
-            ar-modes="webxr scene-viewer quick-look"
-            ar-scale="fixed"
-            ar-placement="floor"
+            shadow-intensity={tableMode ? '0' : '1.2'}
+            shadow-softness="0.9"
+            camera-orbit="0deg 78deg 105%"
+            min-camera-orbit="auto 25deg auto"
+            max-camera-orbit="auto 100deg auto"
             style={{
               width: '100%', height: '100%',
               background: 'transparent',
+              touchAction: 'none',
               '--progress-bar-color': 'var(--accent)',
             } as React.CSSProperties}
           />
@@ -247,9 +298,52 @@ export function Viewer3DScreen() {
         </div>
       )}
 
+      {/* View-on-your-table toggle + hint (real models only) */}
+      {!loading && hasRealModel && (
+        <>
+          <button
+            onClick={() => setTableMode((v) => !v)}
+            style={{
+              position: 'absolute', left: '50%', bottom: 164, transform: 'translateX(-50%)',
+              zIndex: 10, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '10px 18px', borderRadius: 100,
+              background: tableMode ? 'rgba(0,0,0,0.55)' : 'var(--accent)',
+              color: tableMode ? '#fff' : '#1a120a',
+              border: tableMode ? '1px solid rgba(255,255,255,0.18)' : 'none',
+              backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
+              fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 13,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+            }}
+          >
+            {tableMode ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+                <path d="M18 6 6 18M6 6l12 12"/>
+              </svg>
+            ) : (
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                <circle cx="12" cy="13" r="4"/>
+              </svg>
+            )}
+            {tableMode ? 'Exit table view' : 'View on your table'}
+          </button>
+
+          {tableMode && cameraLive && (
+            <div style={{
+              position: 'absolute', left: '50%', top: 112, transform: 'translateX(-50%)',
+              zIndex: 10, pointerEvents: 'none',
+              padding: '6px 14px', borderRadius: 100,
+              background: 'rgba(0,0,0,0.55)', border: '1px solid rgba(255,255,255,0.12)',
+              color: '#fff', fontFamily: 'var(--font-sans)', fontSize: 12, fontWeight: 600,
+            }}>Drag to rotate · point at your table</div>
+          )}
+        </>
+      )}
+
       {/* Bottom panel */}
       <div style={{
-        position: 'absolute', left: 0, right: 0, bottom: 0,
+        position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 10,
         background: 'rgba(255,255,255,0.08)',
         backdropFilter: 'blur(24px) saturate(160%)',
         WebkitBackdropFilter: 'blur(24px) saturate(160%)',
