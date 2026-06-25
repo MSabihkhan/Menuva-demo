@@ -87,7 +87,7 @@ function Hero() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontFamily: 'var(--font-sans)', fontSize: 13, color: 'rgba(255,255,255,0.92)' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 600 }}><Stars /> 4.7</span>
         <span style={{ opacity: 0.6 }}>·</span>
-        <span>Authentic Lahori</span>
+        <span>Burgers · Pizza · Fries</span>
         <span style={{ opacity: 0.6 }}>·</span>
         <span>Dine-in</span>
       </div>

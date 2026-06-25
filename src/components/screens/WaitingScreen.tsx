@@ -171,7 +171,7 @@ function PingButton({ onPing }: { onPing: (msg: string) => void }) {
         Message to Waiter (optional)
       </div>
       <Input
-        placeholder="e.g. Extra raita, no onions…"
+        placeholder="e.g. No pickles, extra cheese…"
         value={message}
         onChange={setMessage}
       />

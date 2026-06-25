@@ -5,7 +5,7 @@ import { db } from '@/lib/firebase';
 import { ref, onValue } from 'firebase/database';
 import { api } from '@/lib/api';
 import { FoodTile } from '@/components/primitives';
-import { ITEM_BY_ID } from '@/data/menu';
+import { ITEM_BY_ID, RESTAURANT } from '@/data/menu';
 import type { Order, OrderLineItem, OrderStatus } from '@/data/menu';
 
 const TABLE_ID = 'T7';
@@ -207,7 +207,7 @@ export default function KitchenPage() {
       }}>
         <div>
           <div style={{ fontFamily: '"DM Serif Display", serif', fontSize: 22, color: '#fff', letterSpacing: '-0.01em' }}>
-            Lahori Darbar — Kitchen View
+            {RESTAURANT.name} — Kitchen View
           </div>
           <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.45)', marginTop: 2 }}>
             Table 7 · Real-time orders

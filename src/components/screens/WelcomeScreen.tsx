@@ -56,7 +56,7 @@ export function WelcomeScreen() {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontFamily: 'var(--font-display)', fontSize: 28, color: '#fff', letterSpacing: '0.02em',
             boxShadow: '0 12px 30px -10px rgba(0,0,0,0.4)',
-          }}>LD</div>
+          }}>CD</div>
 
           <div style={{ fontFamily: 'var(--font-display)', fontSize: 34, color: '#fff', marginTop: 18, letterSpacing: '-0.02em', lineHeight: 1.05, textAlign: 'center' }}>
             {RESTAURANT.name}
