@@ -571,15 +571,27 @@ function StepStatus({ groups, payments, amounts, sessionId, tableTotal, onDone }
         </div>
       )}
 
-      <button
-        onClick={onDone}
-        style={{
-          width: '100%', height: 52, borderRadius: 100, marginTop: 20,
-          background: 'var(--ink)', color: '#fff',
-          fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 15,
-          border: 'none', cursor: 'pointer',
-        }}
-      >Done — New Session</button>
+      {allPaid ? (
+        <button
+          onClick={onDone}
+          style={{
+            width: '100%', height: 52, borderRadius: 100, marginTop: 20,
+            background: 'var(--ink)', color: '#fff',
+            fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 15,
+            border: 'none', cursor: 'pointer',
+          }}
+        >Done — New Session</button>
+      ) : (
+        <button
+          disabled
+          style={{
+            width: '100%', height: 52, borderRadius: 100, marginTop: 20,
+            background: 'var(--border)', color: 'var(--ink-3)',
+            fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 15,
+            border: 'none', cursor: 'not-allowed', opacity: 0.7,
+          }}
+        >Waiting for everyone to pay…</button>
+      )}
     </div>
   );
 }
@@ -643,6 +655,25 @@ export function PaymentScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groups.length]);
+
+  // Sync split method from Firebase: when another person picks the split, auto-advance
+  const [syncedFromFirebase, setSyncedFromFirebase] = useState(false);
+  useEffect(() => {
+    if (syncedFromFirebase || !billSplit || step !== 'split' || groups.length <= 1) return;
+    // Only auto-advance if it was set by someone else
+    if (billSplit.setBySid === sessionId) return;
+    setSyncedFromFirebase(true);
+    const method = billSplit.method as SplitMethod;
+    const methodLabel = SPLIT_OPTIONS.find(s => s.id === method)?.title ?? billSplit.method;
+    setSplitMethod(method);
+    setLocalAmounts(billSplit.amounts);
+    const myAmount = billSplit.amounts[sessionId] ?? 0;
+    setYouPay(myAmount);
+    setPaidItems(myGroup?.items ?? []);
+    showToast(`${billSplit.setByName} selected "${methodLabel}"`, undefined, true);
+    setStep('share');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [billSplit, step, syncedFromFirebase]);
 
   const handleBack = () => {
     if (step === 'split') goBack();

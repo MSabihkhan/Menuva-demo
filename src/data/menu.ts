@@ -104,4 +104,6 @@ export interface BillSplit {
   method: string;
   amounts: Record<string, number>; // sessionId → amount owed
   setAt: number;
+  setBySid: string;
+  setByName: string;
 }

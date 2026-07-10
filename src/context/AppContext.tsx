@@ -465,8 +465,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [sessionId]);
 
   const saveBillSplit = useCallback(async (method: string, amounts: Record<string, number>) => {
-    await set(ref(db, `tables/${TABLE_ID}/billSplit`), { method, amounts, setAt: Date.now() });
-  }, []);
+    const me = groupMembersRef.current.find(m => m.isCurrentUser);
+    await set(ref(db, `tables/${TABLE_ID}/billSplit`), {
+      method, amounts, setAt: Date.now(),
+      setBySid: sessionId, setByName: me?.name || 'Someone',
+    });
+  }, [sessionId]);
 
   const clearQueueNotice = useCallback(() => setState(s => ({ ...s, queueNotice: null })), []);
   const setShowPayment = useCallback((showPayment: boolean) => setState(s => ({ ...s, showPayment })), []);
