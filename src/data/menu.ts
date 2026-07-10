@@ -88,3 +88,20 @@ export interface Order {
   paidAt?: number;
   kitchenNotes?: string;
 }
+
+// ── Group bill payment tracking ───────────────────────────────────────────────
+
+export interface MemberPayment {
+  sid: string;
+  name: string;
+  initials: string;
+  amount: number;
+  method: string;
+  paidAt: number;
+}
+
+export interface BillSplit {
+  method: string;
+  amounts: Record<string, number>; // sessionId → amount owed
+  setAt: number;
+}

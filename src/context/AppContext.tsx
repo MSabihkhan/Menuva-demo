@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { CartItem, GroupMember, Toast, MenuItem, Order, OrderLineItem, OrderStatus } from '@/data/menu';
+import { CartItem, GroupMember, Toast, MenuItem, Order, OrderLineItem, OrderStatus, MemberPayment, BillSplit } from '@/data/menu';
 import { db } from '@/lib/firebase';
 import { ref, set, update, remove, onValue, onDisconnect } from 'firebase/database';
 import { api } from '@/lib/api';
@@ -36,6 +36,8 @@ interface AppState {
   itemExtras: string[];
   selectedCategory: string;
   firebaseConnected: boolean | null;
+  payments: MemberPayment[];
+  billSplit: BillSplit | null;
 }
 
 interface AppContextType extends AppState {
@@ -65,6 +67,10 @@ interface AppContextType extends AppState {
   goBack: () => void;
   joinTable: (name: string) => Promise<void>;
   resetOrder: () => Promise<void>;
+  recordPayment: (amount: number, method: string) => Promise<void>;
+  saveBillSplit: (method: string, amounts: Record<string, number>) => Promise<void>;
+  payments: MemberPayment[];
+  billSplit: BillSplit | null;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -162,6 +168,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     itemExtras: [],
     selectedCategory: 'All',
     firebaseConnected: null,
+    payments: [],
+    billSplit: null,
   });
 
   // Keep ref current so cart callbacks don't capture stale state
@@ -268,6 +276,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => unsub();
   }, []);
 
+  // ─── Firebase: listen to per-person payments ────────────────────────────────
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const paymentsRef = ref(db, `tables/${TABLE_ID}/payments`);
+    const unsub = onValue(paymentsRef, (snapshot) => {
+      const data = snapshot.val() as Record<string, Omit<MemberPayment, 'sid'>> | null;
+      const payments: MemberPayment[] = data
+        ? Object.entries(data).map(([sid, p]) => ({ sid, ...p }))
+        : [];
+      setState(s => ({ ...s, payments }));
+    });
+    return () => unsub();
+  }, []);
+
+  // ─── Firebase: listen to bill-split decision ────────────────────────────────
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const billSplitRef = ref(db, `tables/${TABLE_ID}/billSplit`);
+    const unsub = onValue(billSplitRef, (snapshot) => {
+      const data = snapshot.val() as BillSplit | null;
+      setState(s => ({ ...s, billSplit: data }));
+    });
+    return () => unsub();
+  }, []);
+
   // ─── Firebase: clear my local cart when the backend clears it (order placed) ──
   // The members listener ignores self, so this is how a placement made on another
   // device (which clears every cart server-side) reaches my own cart.
@@ -343,6 +378,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const resetOrder = useCallback(async () => {
     try { await api.resetTable(TABLE_ID); } catch {}
     try { await remove(ref(db, `tables/${TABLE_ID}/members/${sessionId}`)); } catch {}
+    try { await remove(ref(db, `tables/${TABLE_ID}/payments`)); } catch {}
+    try { await remove(ref(db, `tables/${TABLE_ID}/billSplit`)); } catch {}
 
     if (typeof window !== 'undefined') {
       try { localStorage.removeItem('menuva-state'); } catch {}
@@ -368,6 +405,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       itemExtras: [],
       selectedCategory: 'All',
       firebaseConnected: s.firebaseConnected,
+      payments: [],
+      billSplit: null,
     }));
   }, [sessionId]);
 
@@ -412,6 +451,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       groupMembers: s.groupMembers.map(m => m.isCurrentUser ? { ...m, items: [] } : m),
     }));
   }, [sessionId]);
+
+  const recordPayment = useCallback(async (amount: number, method: string) => {
+    const me = groupMembersRef.current.find(m => m.isCurrentUser);
+    if (!me) return;
+    await set(ref(db, `tables/${TABLE_ID}/payments/${sessionId}`), {
+      name: me.name,
+      initials: me.initials,
+      amount,
+      method,
+      paidAt: Date.now(),
+    });
+  }, [sessionId]);
+
+  const saveBillSplit = useCallback(async (method: string, amounts: Record<string, number>) => {
+    await set(ref(db, `tables/${TABLE_ID}/billSplit`), { method, amounts, setAt: Date.now() });
+  }, []);
 
   const clearQueueNotice = useCallback(() => setState(s => ({ ...s, queueNotice: null })), []);
   const setShowPayment = useCallback((showPayment: boolean) => setState(s => ({ ...s, showPayment })), []);
@@ -552,6 +607,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     goBack,
     joinTable,
     resetOrder,
+    recordPayment,
+    saveBillSplit,
+    payments: state.payments,
+    billSplit: state.billSplit,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
